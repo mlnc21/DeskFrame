@@ -29,6 +29,7 @@ using MessageBoxResult = Wpf.Ui.Controls.MessageBoxResult;
 using MessageBox = Wpf.Ui.Controls.MessageBox;
 using System.Windows.Data;
 using System.Text.RegularExpressions;
+using System.Collections;
 namespace DeskFrame
 {
     public partial class DeskFrameWindow : Window
@@ -45,7 +46,24 @@ namespace DeskFrame
         private ICollectionView _collectionView;
         private CancellationTokenSource _cts = new CancellationTokenSource();
 
+        private void SetAsDesktopChild()
+        {
+            ArrayList windowHandles = new ArrayList();
+            Interop.EnumedWindow callback = Interop.EnumWindowCallback;
+            Interop.EnumWindows(callback, windowHandles);
 
+            foreach (IntPtr windowHandle in windowHandles)
+            {
+                IntPtr progmanHandle = Interop.FindWindowEx(windowHandle, IntPtr.Zero, "SHELLDLL_DefView", null);
+                if (progmanHandle != IntPtr.Zero)
+                {
+                    var interopHelper = new WindowInteropHelper(this);
+                    interopHelper.EnsureHandle();
+                    interopHelper.Owner = progmanHandle;
+                    break;
+                }
+            }
+        }
         private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
         {
             if (e.Key == Key.Escape)
@@ -111,14 +129,27 @@ namespace DeskFrame
             }
         }
 
+        protected override void OnActivated(EventArgs e)
+        {
+            KeepWindowBehind();
+            Debug.WriteLine("OnActivated hide");
+            return;
+        }
 
-
-
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            IntPtr hwnd = new WindowInteropHelper(this).Handle;
+            int exStyle = Interop.GetWindowLong(hwnd, Interop.GWL_EXSTYLE);
+            Interop.SetWindowLong(hwnd, Interop.GWL_EXSTYLE, exStyle | Interop.WS_EX_NOACTIVATE);
+        }
         public DeskFrameWindow(Instance instance)
         {
             KeepWindowBehind();
             InitializeComponent();
-            KeepWindowBehind();
+
+
+
             this.Loaded += MainWindow_Loaded;
             this.SourceInitialized += MainWindow_SourceInitialized!;
 
@@ -142,6 +173,7 @@ namespace DeskFrame
             {
                 this.Height = instance.Height;
             }
+            SetAsDesktopChild();
 
             _checkForChages = true;
             FileItems = new ObservableCollection<FileItem>();
@@ -165,23 +197,16 @@ namespace DeskFrame
         {
             if (e.ButtonState == MouseButtonState.Pressed)
             {
-                this.DragMove();
                 KeepWindowBehind();
+                this.DragMove();
                 Debug.WriteLine("win left hide");
                 return;
             }
         }
 
-        protected override void OnActivated(EventArgs e)
-        {
-            KeepWindowBehind();
-            Debug.WriteLine("act h");
-            return;
-        }
 
         private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
         {
-            // KeepWindowBehind();
             if (e.HeightChanged && !_isMinimized)
             {
                 if (this.ActualHeight != 30)
@@ -728,7 +753,7 @@ namespace DeskFrame
                         Registry.CurrentUser.DeleteSubKeyTree(Instance.GetKeyLocation());
                     }
                     this.Close();
-                  
+
                 }
             };
 

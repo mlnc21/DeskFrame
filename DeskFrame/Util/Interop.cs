@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -9,6 +10,36 @@ namespace DeskFrame.Util
 {
     public static class Interop
     {
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+        public const int GWL_EXSTYLE = -20;
+        public const int WS_EX_NOACTIVATE = 0x08000000;
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool EnumWindows(EnumedWindow lpEnumFunc, ArrayList lParam);
+
+        public delegate bool EnumedWindow(IntPtr hwnd, ArrayList lParam);
+
+        public static bool EnumWindowCallback(IntPtr hwnd, ArrayList lParam)
+        {
+            lParam.Add(hwnd);
+            return true;
+        }
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string lpszClass, string lpszWindow);
+        public const int WM_NCACTIVATE = 0x0086;
+        public const int WM_MOUSEACTIVATE = 0x0021;
+        public const int WM_MOVING = 0x0216;
+        public const int WM_LBUTTONDOWN = 0x0201;
+        public const int WM_SETFOCUS = 0x0007;
+        public const int WM_KILLFOCUS = 0x0008;
+        public const int WM_SIZE = 0x0005;
+
         [StructLayout(LayoutKind.Sequential)]
         public struct SHFILEINFO
         {
