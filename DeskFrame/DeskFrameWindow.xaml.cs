@@ -39,7 +39,6 @@ using WindowsDesktop;
 using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using static DeskFrame.Util.Interop;
-using IWshRuntimeLibrary;
 using File = System.IO.File;
 using DeskFrame.Core;
 using DeskFrame.Properties;
@@ -289,7 +288,8 @@ namespace DeskFrame
                     };
                     timer.Tick += (s, args) =>
                     {
-                        if (!_dragdropIntoFolder) ;
+                        // If we're not dragging into a folder clear selection once timer ticks
+                        if (_dragdropIntoFolder) return;
                         {
                             Dispatcher.InvokeAsync(() =>
                             {
@@ -308,7 +308,13 @@ namespace DeskFrame
                     if ((Instance.AutoExpandonCursor) && !_isMinimized && _canAutoClose)
                     {
                         AnimateWindowOpacity(Instance.IdleOpacity, Instance.AnimationSpeed);
-                        Minimize_MouseLeftButtonDown(null, null);
+                        // Raise minimize handler with synthetic args instead of null to satisfy nullable analysis
+                        var syntheticArgs = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+                        {
+                            RoutedEvent = UIElement.MouseLeftButtonDownEvent,
+                            Source = this
+                        };
+                        Minimize_MouseLeftButtonDown(this, syntheticArgs);
                         Task.Run(() =>
                         {
                             try
