@@ -54,7 +54,7 @@ namespace DeskFrame.Util
         /// <param name="oParentFolder">Parent folder</param>
         /// <param name="arrPIDLs">PIDLs</param>
         /// <returns>true if it got the interfaces, otherwise false</returns>
-        private bool GetContextMenuInterfaces(IShellFolder oParentFolder, IntPtr[] arrPIDLs)
+    private bool GetContextMenuInterfaces(IShellFolder oParentFolder, IntPtr[] arrPIDLs)
         {
             IntPtr pUnknownContextMenu = IntPtr.Zero;
 
@@ -153,7 +153,7 @@ namespace DeskFrame.Util
         /// Gets the desktop folder
         /// </summary>
         /// <returns>IShellFolder for desktop folder</returns>
-        private IShellFolder GetDesktopFolder()
+    private IShellFolder GetDesktopFolder()
         {
             IntPtr pUnkownDesktopFolder = IntPtr.Zero;
 
@@ -178,7 +178,7 @@ namespace DeskFrame.Util
         /// </summary>
         /// <param name="folderName">Folder path</param>
         /// <returns>IShellFolder for the folder (relative from the desktop)</returns>
-        private IShellFolder GetParentFolder(string folderName)
+    private IShellFolder? GetParentFolder(string folderName)
         {
             if (null == _oParentFolder)
             {
@@ -200,7 +200,8 @@ namespace DeskFrame.Util
 
                 IntPtr pStrRet = Marshal.AllocCoTaskMem(MAX_PATH * 2 + 4);
                 Marshal.WriteInt32(pStrRet, 0, 0);
-                nResult = _oDesktopFolder.GetDisplayNameOf(pPIDL, SHGNO.FORPARSING, pStrRet);
+                // _oDesktopFolder wurde oben initialisiert, Null-Prüfung für Compiler
+                nResult = _oDesktopFolder!.GetDisplayNameOf(pPIDL, SHGNO.FORPARSING, pStrRet);
                 StringBuilder strFolder = new StringBuilder(MAX_PATH);
                 StrRetToBuf(pStrRet, pPIDL, strFolder, MAX_PATH);
                 Marshal.FreeCoTaskMem(pStrRet);
@@ -229,14 +230,14 @@ namespace DeskFrame.Util
         /// </summary>
         /// <param name="arrFI">Array of FileInfo</param>
         /// <returns>Array of PIDLs</returns>
-        protected IntPtr[] GetPIDLs(FileInfo[] arrFI)
+    protected IntPtr[]? GetPIDLs(FileInfo[] arrFI)
         {
             if (null == arrFI || 0 == arrFI.Length)
             {
                 return null;
             }
 
-            IShellFolder oParentFolder = GetParentFolder(arrFI[0].DirectoryName);
+            IShellFolder? oParentFolder = GetParentFolder(arrFI[0].DirectoryName ?? string.Empty);
             if (null == oParentFolder)
             {
                 return null;
@@ -302,7 +303,7 @@ namespace DeskFrame.Util
                     return;
                 }
 
-                if (false == GetContextMenuInterfaces(_oParentFolder, _arrPIDLs))
+                if (_oParentFolder == null || _arrPIDLs == null || false == GetContextMenuInterfaces(_oParentFolder, _arrPIDLs))
                 {
                     ReleaseAll();
                     return;
@@ -310,6 +311,11 @@ namespace DeskFrame.Util
 
                 pMenu = CreatePopupMenu();
 
+                if (_oContextMenu == null)
+                {
+                    ReleaseAll();
+                    return;
+                }
                 int nResult = _oContextMenu.QueryContextMenu(
                     pMenu,
                     0,
@@ -321,7 +327,7 @@ namespace DeskFrame.Util
                 uint nDefaultCmd = (uint)GetMenuDefaultItem(pMenu, false, 0);
                 if (nDefaultCmd >= CMD_FIRST)
                 {
-                    InvokeCommand(_oContextMenu, nDefaultCmd, arrFI[0].DirectoryName, Control.MousePosition);
+                    InvokeCommand(_oContextMenu, nDefaultCmd, arrFI[0].DirectoryName ?? string.Empty, Control.MousePosition);
                 }
 
                 DestroyMenu(pMenu);
@@ -369,7 +375,7 @@ namespace DeskFrame.Util
                     return;
                 }
 
-                if (false == GetContextMenuInterfaces(_oParentFolder, _arrPIDLs))
+                if (_oParentFolder == null || _arrPIDLs == null || false == GetContextMenuInterfaces(_oParentFolder, _arrPIDLs))
                 {
                     ReleaseAll();
                     return;
@@ -377,6 +383,11 @@ namespace DeskFrame.Util
 
                 pMenu = CreatePopupMenu();
 
+                if (_oContextMenu == null)
+                {
+                    ReleaseAll();
+                    return;
+                }
                 int nResult = _oContextMenu.QueryContextMenu(
                     pMenu,
                     0,
@@ -426,7 +437,7 @@ namespace DeskFrame.Util
         /// </summary>
         private void WindowsHookInvoked(object sender, HookEventArgs e)
         {
-            CWPSTRUCT cwp = (CWPSTRUCT)Marshal.PtrToStructure(e.lParam, typeof(CWPSTRUCT));
+            CWPSTRUCT cwp = Marshal.PtrToStructure<CWPSTRUCT>(e.lParam);
 
             if (_oContextMenu2 != null &&
                 (cwp.message == (int)WM.INITMENUPOPUP ||
@@ -452,13 +463,13 @@ namespace DeskFrame.Util
         #endregion
 
         #region Local variabled
-        private IContextMenu _oContextMenu;
-        private IContextMenu2 _oContextMenu2;
-        private IContextMenu3 _oContextMenu3;
-        private IShellFolder _oDesktopFolder;
-        private IShellFolder _oParentFolder;
-        private IntPtr[] _arrPIDLs;
-        private string _strParentFolder;
+    private IContextMenu? _oContextMenu;
+    private IContextMenu2? _oContextMenu2;
+    private IContextMenu3? _oContextMenu3;
+    private IShellFolder? _oDesktopFolder;
+    private IShellFolder? _oParentFolder;
+    private IntPtr[]? _arrPIDLs;
+    private string _strParentFolder = string.Empty;
         #endregion
 
         #region Variables and Constants
@@ -1347,7 +1358,7 @@ namespace DeskFrame.Util
         // ************************************************************************
         // Internal properties
         protected IntPtr m_hhook = IntPtr.Zero;
-        protected HookProc m_filterFunc = null;
+    protected HookProc m_filterFunc;
         protected HookType m_hookType;
         // ************************************************************************
 
@@ -1358,11 +1369,10 @@ namespace DeskFrame.Util
 
         // ************************************************************************
         // Event: HookInvoked 
-        public event HookEventHandler HookInvoked;
+    public event HookEventHandler? HookInvoked;
         protected void OnHookInvoked(HookEventArgs e)
         {
-            if (HookInvoked != null)
-                HookInvoked(this, e);
+            HookInvoked?.Invoke(this, e);
         }
         // ************************************************************************
 

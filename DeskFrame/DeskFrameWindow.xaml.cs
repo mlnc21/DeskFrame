@@ -99,23 +99,23 @@ namespace DeskFrame
         private CancellationTokenSource _changeIconSizeCts = new CancellationTokenSource();
         public DeskFrameWindow WonRight = null;
         public DeskFrameWindow WonLeft = null;
-        MenuItem nameMenuItem;
-        MenuItem dateModifiedMenuItem;
-        MenuItem dateCreatedMenuItem;
-        MenuItem fileTypeMenuItem;
-        MenuItem fileSizeMenuItem;
-        MenuItem ascendingMenuItem;
-        MenuItem descendingMenuItem;
-        MenuItem folderOrderMenuItem;
-        MenuItem folderFirstMenuItem;
-        MenuItem folderLastMenuItem;
-        MenuItem folderNoneMenuItem;
+    MenuItem nameMenuItem = new MenuItem();
+    MenuItem dateModifiedMenuItem = new MenuItem();
+    MenuItem dateCreatedMenuItem = new MenuItem();
+    MenuItem fileTypeMenuItem = new MenuItem();
+    MenuItem fileSizeMenuItem = new MenuItem();
+    MenuItem ascendingMenuItem = new MenuItem();
+    MenuItem descendingMenuItem = new MenuItem();
+    MenuItem folderOrderMenuItem = new MenuItem();
+    MenuItem folderFirstMenuItem = new MenuItem();
+    MenuItem folderLastMenuItem = new MenuItem();
+    MenuItem folderNoneMenuItem = new MenuItem();
 
-        private string _fileCount;
+    private string _fileCount = string.Empty;
         private int _folderCount = 0;
         private DateTime _lastUpdated;
-        private string _folderSize;
-        private double _itemWidth;
+    private string _folderSize = string.Empty;
+    private double _itemWidth;
 
         public enum SortBy
         {

@@ -565,11 +565,50 @@ public class InstanceController
                 AddInstance();
             }
             Debug.WriteLine("Showing windows DONE");
+            // Ensure a desktop instance exists if user wants automatic desktop box
+            TryAddDesktopInstance();
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"ERROR reading key: {ex.Message}");
         }
         isInitializingInstances = false;
+    }
+
+    private void TryAddDesktopInstance()
+    {
+        try
+        {
+            string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            if (string.IsNullOrWhiteSpace(desktopPath)) return;
+            bool alreadyHasDesktop = Instances.Any(i => string.Equals(i.Folder, desktopPath, StringComparison.OrdinalIgnoreCase));
+            if (alreadyHasDesktop) return;
+            var desktopInstance = new Instance("Desktop", false)
+            {
+                Folder = desktopPath,
+                Name = "Desktop",
+                PosX = 20,
+                PosY = 20,
+                Width = 420,
+                Height = 320,
+                Minimized = false,
+                ShowHiddenFiles = false,
+                ShowDisplayName = true,
+                AutoExpandonCursor = true,
+                BorderEnabled = false,
+            };
+            Instances.Add(desktopInstance);
+            WriteInstanceToKey(desktopInstance);
+            var subWindow = new DeskFrameWindow(desktopInstance);
+            _subWindows.Add(subWindow);
+            subWindow.ChangeBackgroundOpacity(desktopInstance.Opacity);
+            subWindow.Show();
+            _subWindowsPtr.Add(new WindowInteropHelper(subWindow).Handle);
+            subWindow.HandleWindowMove(true);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"TryAddDesktopInstance failed: {ex.Message}");
+        }
     }
 }

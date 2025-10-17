@@ -25,7 +25,7 @@ namespace DeskFrame.Core
         public DateTime DateCreated { get; set; }
         public string? FileType { get; set; }
         public long ItemSize { get; set; }
-        public string DisplaySize { get; set; }
+    public string DisplaySize { get; set; } = string.Empty;
 
         public string DisplayName
         {

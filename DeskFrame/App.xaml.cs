@@ -11,7 +11,7 @@ namespace DeskFrame
     /// </summary>
     public partial class App : Application
     {
-        private DispatcherTimer updateTimer;
+    private DispatcherTimer updateTimer = new();
         public RegistryHelper reg = new RegistryHelper("DeskFrame");
         protected override void OnStartup(StartupEventArgs e)
         {
