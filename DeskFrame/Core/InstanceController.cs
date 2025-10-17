@@ -3,6 +3,7 @@ using Microsoft.Win32;
 using System.Diagnostics;
 using System.IO;
 using System.Windows.Interop;
+using System.Runtime.InteropServices;
 
 public class InstanceController
 {
@@ -13,6 +14,15 @@ public class InstanceController
     public List<DeskFrameWindow> _subWindows = new List<DeskFrameWindow>();
     public List<IntPtr> _subWindowsPtr = new List<IntPtr>();
     private bool Visible = true;
+
+    // Liste der Dateien/Ordner deren Attribute wir geändert haben
+    private List<(string Path, FileAttributes Original)> _desktopHiddenItems = new();
+    // Explorer Desktop Icon Sichtbarkeit (HideIcons) – 0 = sichtbar, 1 = ausgeblendet
+    private int? _originalHideIcons = null; // merken zum Wiederherstellen
+    private bool _hideIconsModified = false;
+    // Fallback: direkte Fenster-Hides (SHELLDLL_DefView / SysListView32) falls Registry Toggle keine Wirkung zeigt
+    private List<IntPtr> _hiddenDesktopListViews = new();
+
     public void WriteOverInstanceToKey(Instance instance, string oldKey)
     {
 
@@ -579,20 +589,23 @@ public class InstanceController
     {
         try
         {
-            string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            string desktopPathRaw = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            // Zusätzlich: Öffentlicher Desktop (enthält oft weitere sichtbare Verknüpfungen)
+            string publicDesktopPathRaw = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory));
+            string desktopPath = NormalizePath(desktopPathRaw);
             if (string.IsNullOrWhiteSpace(desktopPath)) return;
-            bool alreadyHasDesktop = Instances.Any(i => string.Equals(i.Folder, desktopPath, StringComparison.OrdinalIgnoreCase));
+            bool alreadyHasDesktop = Instances.Any(i => NormalizePath(i.Folder) == desktopPath);
             if (alreadyHasDesktop) return;
             var desktopInstance = new Instance("Desktop", false)
             {
-                Folder = desktopPath,
+                Folder = desktopPathRaw, // Registry & UI können Original behalten
                 Name = "Desktop",
                 PosX = 20,
                 PosY = 20,
                 Width = 420,
                 Height = 320,
                 Minimized = false,
-                ShowHiddenFiles = false,
+                ShowHiddenFiles = true, // wichtig damit versteckte Dateien sichtbar bleiben
                 ShowDisplayName = true,
                 AutoExpandonCursor = true,
                 BorderEnabled = false,
@@ -602,6 +615,11 @@ public class InstanceController
             var subWindow = new DeskFrameWindow(desktopInstance);
             _subWindows.Add(subWindow);
             subWindow.ChangeBackgroundOpacity(desktopInstance.Opacity);
+            // Vor dem Laden der Dateien Desktop-Inhalte verstecken (User + Public) & Explorer Einstellungen anpassen
+            EnsureExplorerHidesHiddenFiles();
+            EnsureExplorerHidesDesktopIcons();
+            HideDesktopItemsForFrame(desktopPathRaw);
+            HideDesktopItemsForFrame(publicDesktopPathRaw);
             subWindow.Show();
             _subWindowsPtr.Add(new WindowInteropHelper(subWindow).Handle);
             subWindow.HandleWindowMove(true);
@@ -610,5 +628,303 @@ public class InstanceController
         {
             Debug.WriteLine($"TryAddDesktopInstance failed: {ex.Message}");
         }
+    }
+
+    // Versteckt alle normalen Dateien/Ordner auf dem Desktop (setzt Hidden) und merkt Originalattribute
+    private void HideDesktopItemsForFrame(string desktopPath)
+    {
+        try
+        {
+            if (!Directory.Exists(desktopPath)) return;
+
+            var entries = Directory.EnumerateFileSystemEntries(desktopPath);
+            foreach (var entry in entries)
+            {
+                try
+                {
+                    // Systemdateien, Recycle Bin Links, Desktop.ini überspringen
+                    string name = Path.GetFileName(entry);
+                    if (string.Equals(name, "desktop.ini", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (name.StartsWith("$RECYCLE") || name.StartsWith("Recycle") ) continue;
+
+                    FileAttributes attrs = File.GetAttributes(entry);
+                    // Bereits versteckt -> nicht doppelt hinzufügen
+                    if ((attrs & FileAttributes.Hidden) == FileAttributes.Hidden) continue;
+
+                    // Speichern Original
+                    _desktopHiddenItems.Add((entry, attrs));
+                    File.SetAttributes(entry, attrs | FileAttributes.Hidden);
+                }
+                catch (Exception inner)
+                {
+                    Debug.WriteLine($"HideDesktopItemsForFrame item failed: {inner.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"HideDesktopItemsForFrame failed: {ex.Message}");
+        }
+    }
+
+    // Stellt ursprüngliche Attribute wieder her
+    public void RestoreDesktopItems()
+    {
+        foreach (var item in _desktopHiddenItems)
+        {
+            try
+            {
+                if (File.Exists(item.Path) || Directory.Exists(item.Path))
+                {
+                    File.SetAttributes(item.Path, item.Original);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"RestoreDesktopItems failed for {item.Path}: {ex.Message}");
+            }
+        }
+        _desktopHiddenItems.Clear();
+        RestoreExplorerHiddenSetting();
+        RestoreExplorerDesktopIcons();
+    }
+
+    // Normalisiert Pfade zur robusten Duplikat-Erkennung (volle Pfadauflösung + LongPath + Kleinbuchstaben)
+    private string NormalizePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        try
+        {
+            string full = Path.GetFullPath(path);
+            // Long path Auflösung
+            Span<char> buffer = stackalloc char[full.Length + 10];
+            uint len = GetLongPathName(full, buffer, (uint)buffer.Length);
+            string longPath = (len > 0 && len < buffer.Length) ? new string(buffer.Slice(0, (int)len)) : full;
+            return longPath.TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant();
+        }
+        catch
+        {
+            return path.Trim().ToLowerInvariant();
+        }
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetLongPathName(string lpszShortPath, Span<char> lpszLongPath, uint cchBuffer);
+
+    // --- Explorer Hidden Einstellung manipulieren (Registry) ---
+    private bool _explorerHiddenModified = false;
+    private int? _originalExplorerHiddenValue = null; // 1 = "Zeige versteckte Dateien", 2 = "Verstecke"
+
+    private void EnsureExplorerHidesHiddenFiles()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", true);
+            if (key == null) return;
+            object? val = key.GetValue("Hidden");
+            if (val is int current && current == 1)
+            {
+                _originalExplorerHiddenValue = current;
+                key.SetValue("Hidden", 2, Microsoft.Win32.RegistryValueKind.DWord);
+                _explorerHiddenModified = true;
+                BroadcastSettingsChange();
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"EnsureExplorerHidesHiddenFiles failed: {ex.Message}");
+        }
+    }
+
+    // Desktop-Icons komplett ausblenden (Shell/DesktopView) über HideIcons
+    private void EnsureExplorerHidesDesktopIcons()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", true);
+            if (key == null) return;
+            object? val = key.GetValue("HideIcons");
+            if (val is int current)
+            {
+                // Semantik: HideIcons = 0 => Icons werden angezeigt, HideIcons = 1 => Icons ausgeblendet.
+                // Falls derzeit sichtbar (0), setzen wir auf 1 zum Ausblenden und merken uns den Originalwert.
+                if (current == 0)
+                {
+                    _originalHideIcons = current;
+                    key.SetValue("HideIcons", 1, Microsoft.Win32.RegistryValueKind.DWord);
+                    _hideIconsModified = true;
+                    BroadcastSettingsChange();
+                }
+            }
+            else
+            {
+                // Wert existiert nicht -> wir nehmen an: Icons waren sichtbar (äquivalent zu 0) und setzen auf 1 (ausblenden)
+                _originalHideIcons = 0;
+                key.SetValue("HideIcons", 1, Microsoft.Win32.RegistryValueKind.DWord);
+                _hideIconsModified = true;
+                BroadcastSettingsChange();
+            }
+            // Direkt im Anschluss Fallback versuchen, damit Sichtbarkeit sofort verschwindet ohne Explorer-Neustart
+            TryHideDesktopShellViews();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"EnsureExplorerHidesDesktopIcons failed: {ex.Message}");
+        }
+    }
+
+    private void RestoreExplorerHiddenSetting()
+    {
+        if (!_explorerHiddenModified || _originalExplorerHiddenValue is null) return;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", true);
+            if (key != null)
+            {
+                key.SetValue("Hidden", _originalExplorerHiddenValue, Microsoft.Win32.RegistryValueKind.DWord);
+                BroadcastSettingsChange();
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"RestoreExplorerHiddenSetting failed: {ex.Message}");
+        }
+        finally
+        {
+            _explorerHiddenModified = false;
+            _originalExplorerHiddenValue = null;
+        }
+    }
+
+    private void RestoreExplorerDesktopIcons()
+    {
+        if (!_hideIconsModified || _originalHideIcons is null) return;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", true);
+            if (key != null)
+            {
+                key.SetValue("HideIcons", _originalHideIcons, Microsoft.Win32.RegistryValueKind.DWord);
+                BroadcastSettingsChange();
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"RestoreExplorerDesktopIcons failed: {ex.Message}");
+        }
+        finally
+        {
+            _hideIconsModified = false;
+            _originalHideIcons = null;
+        }
+        // Fenster wieder herstellen
+        RestoreDesktopShellViews();
+    }
+
+    [DllImport("shell32.dll")] private static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
+    private const uint SHCNE_ASSOCCHANGED = 0x8000000; // Trigger global refresh
+    private const uint SHCNF_IDLIST = 0x0;
+    private const uint HWND_BROADCAST = 0xFFFF;
+    private const uint WM_SETTINGCHANGE = 0x1A;
+    private const uint SMTO_ABORTIFHUNG = 0x0002;
+
+    private void BroadcastSettingsChange()
+    {
+        try
+        {
+            SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
+            SendMessageTimeout(new IntPtr(HWND_BROADCAST), WM_SETTINGCHANGE, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, 2000, out _);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"BroadcastSettingsChange failed: {ex.Message}");
+        }
+    }
+
+    // --------- Fallback: Desktop Icon Fenster direkt verstecken ---------
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    private const int SW_HIDE = 0;
+    private const int SW_SHOW = 5;
+
+    private void TryHideDesktopShellViews()
+    {
+        try
+        {
+            // Schon versteckt? nicht erneut
+            if (_hiddenDesktopListViews.Count > 0) return;
+            List<IntPtr> listViewHandles = new();
+            EnumWindows((topHwnd, _) =>
+            {
+                // Kandidaten: Progman oder WorkerW Fenster enthalten SHELLDLL_DefView
+                var className = GetWindowClass(topHwnd);
+                if (className == "Progman" || className == "WorkerW")
+                {
+                    EnumChildWindows(topHwnd, (child, __) =>
+                    {
+                        var childClass = GetWindowClass(child);
+                        if (childClass == "SHELLDLL_DefView")
+                        {
+                            // Direkt das DefView verstecken (enthält ListView)
+                            listViewHandles.Add(child);
+                        }
+                        return true;
+                    }, IntPtr.Zero);
+                }
+                return true;
+            }, IntPtr.Zero);
+
+            foreach (var h in listViewHandles.Distinct())
+            {
+                if (ShowWindow(h, SW_HIDE))
+                {
+                    _hiddenDesktopListViews.Add(h);
+                }
+            }
+            Debug.WriteLine($"TryHideDesktopShellViews: versteckte Handles={_hiddenDesktopListViews.Count}");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"TryHideDesktopShellViews failed: {ex.Message}");
+        }
+    }
+
+    private void RestoreDesktopShellViews()
+    {
+        try
+        {
+            foreach (var h in _hiddenDesktopListViews)
+            {
+                ShowWindow(h, SW_SHOW);
+            }
+            Debug.WriteLine($"RestoreDesktopShellViews: wiederhergestellt={_hiddenDesktopListViews.Count}");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"RestoreDesktopShellViews failed: {ex.Message}");
+        }
+        finally
+        {
+            _hiddenDesktopListViews.Clear();
+        }
+    }
+
+    private string GetWindowClass(IntPtr hWnd)
+    {
+        var sb = new System.Text.StringBuilder(256);
+        if (GetClassName(hWnd, sb, sb.Capacity) != 0)
+        {
+            return sb.ToString();
+        }
+        return string.Empty;
     }
 }
