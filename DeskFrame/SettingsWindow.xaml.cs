@@ -7,22 +7,33 @@ namespace DeskFrame
 {
     public partial class SettingsWindow : FluentWindow
     {
-        InstanceController _controller;
-        DeskFrameWindow _dWindows;
-        Instance _instance;
-        MainWindow _window;
+        private readonly InstanceController _controller;
+        private DeskFrameWindow? _dWindows;
+        private Instance? _instance;
+        private readonly MainWindow _window;
+        private bool _xamlLoaded;
+        private ToggleSwitch? GetAutoUpdateToggleSwitch() => FindName("AutoUpdateToggleSwitch") as ToggleSwitch;
+        private ToggleSwitch? GetDoubleClickToHideSwitch() => FindName("DoubleClickToHideSwitch") as ToggleSwitch;
+        private ToggleSwitch? GetModifyDesktopEnvironmentSwitch() => FindName("ModifyDesktopEnvironmentSwitch") as ToggleSwitch;
         public SettingsWindow(InstanceController controller, MainWindow window)
         {
-            InitializeComponent();
-            this.LocationChanged += Window_LocationChanged;
+            ManualInitializeComponent();
+            LocationChanged += Window_LocationChanged;
             this.MinHeight = 0;
             this.MinWidth = 200;
             _window = window;
             _controller = controller;
             // if (_controller.reg.KeyExistsRoot("blurBackground")) blurToggle.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("blurBackground");
-            if (_controller.reg.KeyExistsRoot("AutoUpdate")) AutoUpdateToggleSwitch.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("AutoUpdate");
-            if (_controller.reg.KeyExistsRoot("DoubleClickToHide")) DoubleClickToHideSwitch.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("DoubleClickToHide");
+            var autoToggle = GetAutoUpdateToggleSwitch();
+            if (_controller.reg.KeyExistsRoot("AutoUpdate") && autoToggle != null) autoToggle.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("AutoUpdate");
+            var dblToggle = GetDoubleClickToHideSwitch();
+            if (_controller.reg.KeyExistsRoot("DoubleClickToHide") && dblToggle != null) dblToggle.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("DoubleClickToHide");
+            var modifyToggle = GetModifyDesktopEnvironmentSwitch();
+            if (!_controller.reg.KeyExistsRoot("ModifyDesktopEnvironment"))
+                _controller.reg.WriteToRegistryRoot("ModifyDesktopEnvironment", false);
+            if (modifyToggle != null) modifyToggle.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("ModifyDesktopEnvironment");
         }
+
 
         private void blurToggle_CheckChanged(object sender, System.Windows.RoutedEventArgs e)
         {
@@ -65,7 +76,8 @@ namespace DeskFrame
 
         private void AutoUpdateToggleSwitch_Click(object sender, RoutedEventArgs e)
         {
-            if ((bool)AutoUpdateToggleSwitch.IsChecked!)
+            var autoToggle = GetAutoUpdateToggleSwitch();
+            if (autoToggle != null && (bool)autoToggle.IsChecked!)
             {
 
                 _controller.reg.AddToAutoRun("DeskFrame", Process.GetCurrentProcess().MainModule!.FileName);
@@ -74,10 +86,13 @@ namespace DeskFrame
             {
                 _controller.reg.RemoveFromAutoRun("DeskFrame");
             }
-            _controller.reg.WriteToRegistryRoot("AutoUpdate", AutoUpdateToggleSwitch.IsChecked);
+            if (autoToggle?.IsChecked != null)
+            {
+                _controller.reg.WriteToRegistryRoot("AutoUpdate", autoToggle.IsChecked!);
+            }
         }
 
-        private void DefaultFrameStyleButton_Click(object sender, RoutedEventArgs e)
+        private void DefaultFrameStyleButton_Click(object? sender, RoutedEventArgs e)
         {
             if (_dWindows != null) _dWindows.Close();
 
@@ -86,16 +101,12 @@ namespace DeskFrame
             _instance.Folder = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
 
             _dWindows = new DeskFrameWindow(_instance);
-            _dWindows.addFolder.Visibility = Visibility.Hidden;
-            _dWindows.showFolder.Visibility = Visibility.Visible;
-            _dWindows.title.Visibility = Visibility.Visible;
-            _dWindows.WindowBorder.Visibility = Visibility.Visible;
             _dWindows.Left = this.Width + this.Left + 10;
             _dWindows.Top = this.Top;
             _dWindows.Show();
 
         }
-        private void Window_LocationChanged(object sender, EventArgs e)
+        private void Window_LocationChanged(object? sender, EventArgs e)
         {
             if (_dWindows != null)
             {
@@ -103,9 +114,9 @@ namespace DeskFrame
                 _dWindows.Top = this.Top;
             }
         }
-        private void ResetDefaultFrameStyleButton_Click(object sender, RoutedEventArgs e)
+        private void ResetDefaultFrameStyleButton_Click(object? sender, RoutedEventArgs e)
         {
-            string[] keep = { "AutoUpdate", "blurBackground", "startOnLogin" };
+            string[] keep = { "AutoUpdate", "blurBackground", "startOnLogin", "ModifyDesktopEnvironment" };
             RegistryKey key = Registry.CurrentUser.OpenSubKey("Software\\DeskFrame", writable: true)!;
             foreach (var name in key.GetValueNames())
             {
@@ -130,12 +141,38 @@ namespace DeskFrame
                 _dWindows.Close();
             }
         }
-        private void DoubleClickToHideSwitch_Click(object sender, RoutedEventArgs e)
+        private void DoubleClickToHideSwitch_Click(object? sender, RoutedEventArgs e)
         {
-            _controller.reg.WriteToRegistryRoot("DoubleClickToHide", DoubleClickToHideSwitch.IsChecked!);
-            _window.DoubleClickToHide = (bool)DoubleClickToHideSwitch.IsChecked!;
+            var dblToggle = GetDoubleClickToHideSwitch();
+            if (dblToggle != null)
+            {
+                _controller.reg.WriteToRegistryRoot("DoubleClickToHide", dblToggle.IsChecked!);
+                _window.DoubleClickToHide = (bool)dblToggle.IsChecked!;
+            }
         }
 
+        private void ModifyDesktopEnvironmentSwitch_Click(object? sender, RoutedEventArgs e)
+        {
+            var modifyToggle = GetModifyDesktopEnvironmentSwitch();
+            if (modifyToggle != null && modifyToggle.IsChecked != null)
+            {
+                _controller.reg.WriteToRegistryRoot("ModifyDesktopEnvironment", modifyToggle.IsChecked!);
+            }
+        }
+
+        private void ManageCategoriesButton_Click(object? sender, RoutedEventArgs e)
+        {
+            var win = new CategoryManagerWindow(_controller);
+            win.Owner = this;
+            win.Show();
+        }
+        private void ManualInitializeComponent()
+        {
+            if (_xamlLoaded) return;
+            _xamlLoaded = true;
+            var uri = new System.Uri("/DeskFrame;component/SettingsWindow.xaml", System.UriKind.Relative);
+            System.Windows.Application.LoadComponent(this, uri);
+        }
 
     }
 }

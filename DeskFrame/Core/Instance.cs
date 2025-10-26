@@ -47,7 +47,7 @@ public class Instance : INotifyPropertyChanged
     private int _opacity = 26;
     private int _sortBy = 1;
     private int _folderOrder = 0;
-    private int[] _showOnVirtualDesktops;
+    private int[] _showOnVirtualDesktops = Array.Empty<int>();
     private double _titleFontSize = 13;
     private int _iconSize = 32;
     public int IconSize
@@ -601,10 +601,10 @@ public class Instance : INotifyPropertyChanged
             RegistryHelper helper = new RegistryHelper("DeskFrame");
 
             var v = helper.ReadKeyValueRoot("IdleOpacity");
-            if (v != null) _idleOpacity = double.Parse(v.ToString());
+            if (v != null && double.TryParse(v.ToString(), out var parsedIdleOpacity)) _idleOpacity = parsedIdleOpacity;
 
             v = helper.ReadKeyValueRoot("AnimationSpeed");
-            if (v != null) _animationSpeed = double.Parse(v.ToString());
+            if (v != null && double.TryParse(v.ToString(), out var parsedAnimationSpeed)) _animationSpeed = parsedAnimationSpeed;
 
             v = helper.ReadKeyValueRoot("TitleFontFamily");
             if (v != null) _titleFontFamily = v.ToString();
@@ -628,46 +628,47 @@ public class Instance : INotifyPropertyChanged
             if (v != null) _borderEnabled = (bool)v;
 
             v = helper.ReadKeyValueRoot("TitleTextAlignment");
-            if (v != null) _titleTextAlignment = (Forms.HorizontalAlignment)Enum.Parse(typeof(Forms.HorizontalAlignment), v.ToString());
+            if (v != null && Enum.TryParse(typeof(Forms.HorizontalAlignment), v.ToString(), out var alignment))
+                _titleTextAlignment = (Forms.HorizontalAlignment)alignment;
 
             v = helper.ReadKeyValueRoot("FileFilterRegex");
-            if (v != null) _fileFilterRegex = v.ToString();
+            if (v != null) _fileFilterRegex = v.ToString() ?? string.Empty;
 
             v = helper.ReadKeyValueRoot("FileFilterHideRegex");
-            if (v != null) _fileFilterHideRegex = v.ToString();
+            if (v != null) _fileFilterHideRegex = v.ToString() ?? string.Empty;
 
             v = helper.ReadKeyValueRoot("TitleBarColor");
-            if (v != null) _titleBarColor = v.ToString();
+            if (v != null) _titleBarColor = v.ToString() ?? _titleBarColor;
 
             v = helper.ReadKeyValueRoot("TitleTextColor");
-            if (v != null) _titleTextColor = v.ToString();
+            if (v != null) _titleTextColor = v.ToString() ?? _titleTextColor;
 
             v = helper.ReadKeyValueRoot("ListViewBackgroundColor");
-            if (v != null) _listViewBackgroundColor = v.ToString();
+            if (v != null) _listViewBackgroundColor = v.ToString() ?? _listViewBackgroundColor;
 
             v = helper.ReadKeyValueRoot("ListViewFontColor");
-            if (v != null) _listViewFontColor = v.ToString();
+            if (v != null) _listViewFontColor = v.ToString() ?? _listViewFontColor;
 
             v = helper.ReadKeyValueRoot("ListViewFontShadowColor");
-            if (v != null) _listViewFontShadowColor = v.ToString();
+            if (v != null) _listViewFontShadowColor = v.ToString() ?? _listViewFontShadowColor;
 
             v = helper.ReadKeyValueRoot("Opacity");
-            if (v != null) _opacity = int.Parse(v.ToString());
+            if (v != null && int.TryParse(v.ToString(), out var parsedOpacity)) _opacity = parsedOpacity;
 
             v = helper.ReadKeyValueRoot("SortBy");
-            if (v != null) _sortBy = int.Parse(v.ToString());
+            if (v != null && int.TryParse(v.ToString(), out var parsedSort)) _sortBy = parsedSort;
 
             v = helper.ReadKeyValueRoot("FolderOrder");
-            if (v != null) _folderOrder = int.Parse(v.ToString());
+            if (v != null && int.TryParse(v.ToString(), out var parsedFolderOrder)) _folderOrder = parsedFolderOrder;
 
             v = helper.ReadKeyValueRoot("TitleFontSize");
-            if (v != null) _titleFontSize = double.Parse(v.ToString());
+            if (v != null && double.TryParse(v.ToString(), out var parsedFontSize)) _titleFontSize = parsedFontSize;
 
             v = helper.ReadKeyValueRoot("IconSize");
-            if (v != null) _iconSize = int.Parse(v.ToString());
+            if (v != null && int.TryParse(v.ToString(), out var parsedIconSize)) _iconSize = parsedIconSize;
         }
     }
-    protected void OnPropertyChanged(string propertyName, string value)
+    protected void OnPropertyChanged(string propertyName, string? value)
     {
         if (isWindowClosing) return;
         string[] notGlobalProperties = {
@@ -710,7 +711,7 @@ public class Instance : INotifyPropertyChanged
                 }
                 else if (propertyName != "ShowOnVirtualDesktops")
                 {
-                    MainWindow._controller.reg.WriteToRegistry(propertyName, value, this);
+                    MainWindow._controller.reg.WriteToRegistry(propertyName, value ?? string.Empty, this);
                 }
                 else if (propertyName == "ShowOnVirtualDesktops")
                 {
@@ -719,7 +720,7 @@ public class Instance : INotifyPropertyChanged
             }
             if (_settingDefault && !notGlobalProperties.Contains(propertyName))
             {
-                MainWindow._controller.reg.WriteToRegistryRoot(propertyName, value);
+                MainWindow._controller.reg.WriteToRegistryRoot(propertyName, value ?? string.Empty);
             }
         }
 

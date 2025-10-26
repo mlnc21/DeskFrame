@@ -33,6 +33,8 @@
                 </StackPanel>
                 <ui:ToggleSwitch x:Name="AutoUpdateToggleSwitch" Content="{x:Static prop:Lang.DeskFrameFrameSettings_AutoUpdate}" Margin="10,20,0,0" Click="AutoUpdateToggleSwitch_Click"/>
                 <ui:ToggleSwitch x:Name="DoubleClickToHideSwitch" Content="{x:Static prop:Lang.DeskFrameFrameSettings_DoubleClickHide}" Margin="10,20,0,0" Click="DoubleClickToHideSwitch_Click"/>
+                <ui:ToggleSwitch x:Name="ModifyDesktopEnvironmentSwitch" Content="Desktop-Umgebung verändern (Icons verstecken)" Margin="10,20,0,0" Click="ModifyDesktopEnvironmentSwitch_Click"/>
+                <ui:Button x:Name="ManageCategoriesButton" Content="Kategorien verwalten" Margin="10,20,0,0" Click="ManageCategoriesButton_Click"/>
 
             </StackPanel>
         </StackPanel>

@@ -1,5 +1,7 @@
 ﻿using Microsoft.Win32;
 using System.Diagnostics;
+using System;
+using System.Collections.Generic;
 
 public class RegistryHelper
 {
@@ -12,37 +14,40 @@ public class RegistryHelper
     {
         try
         {
-            if (string.IsNullOrEmpty(instance.Name))
+            if (instance == null || string.IsNullOrEmpty(instance.Name))
             {
                 Debug.WriteLine("Instance is null reg not writen");
                 return;
             }
-            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(instance.GetKeyLocation()))
+            using (RegistryKey? key = Registry.CurrentUser.CreateSubKey(instance.GetKeyLocation()))
             {
-                key.SetValue(keyName, value);
+                key?.SetValue(keyName, value);
             }
             //  Debug.WriteLine($"wrote key: {keyName}\t value: {value}\nto: {instance.GetKeyLocation()}");
         }
         catch { }
     }
-    public void WriteMultiLineRegistry(string keyName, List<string> list, Instance instance)
+    public void WriteMultiLineRegistry(string keyName, List<string>? list, Instance instance)
     {
         try
         {
-            if (string.IsNullOrEmpty(instance?.Name))
+            if (instance == null || string.IsNullOrEmpty(instance.Name))
             {
                 Debug.WriteLine("Instance is null reg not written");
                 return;
             }
-            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(instance.GetKeyLocation()))
+            using (RegistryKey? key = Registry.CurrentUser.CreateSubKey(instance.GetKeyLocation()))
             {
-                if (list == null || list.Count == 0)
+                if (key != null)
                 {
-                    key.SetValue(keyName, new string[0], RegistryValueKind.MultiString);
-                }
-                else
-                {
-                    key.SetValue(keyName, list.ToArray(), RegistryValueKind.MultiString);
+                    if (list == null || list.Count == 0)
+                    {
+                        key.SetValue(keyName, Array.Empty<string>(), RegistryValueKind.MultiString);
+                    }
+                    else
+                    {
+                        key.SetValue(keyName, list.ToArray(), RegistryValueKind.MultiString);
+                    }
                 }
             }
         }
@@ -51,26 +56,26 @@ public class RegistryHelper
         }
     }
 
-    public void WriteIntArrayToRegistry(string keyName, int[] values, Instance instance)
+    public void WriteIntArrayToRegistry(string keyName, int[]? values, Instance instance)
     {
         try
         {
-            if (string.IsNullOrEmpty(instance?.Name))
+            if (instance == null || string.IsNullOrEmpty(instance.Name))
             {
                 Debug.WriteLine("Instance is null reg not writen");
                 return;
             }
             if (values == null)
             {
-                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(instance.GetKeyLocation()))
+                using (RegistryKey? key = Registry.CurrentUser.CreateSubKey(instance.GetKeyLocation()))
                 {
-                    key.SetValue(keyName, "");
+                    key?.SetValue(keyName, "");
                 }
                 return;
             }
-            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(instance.GetKeyLocation()))
+            using (RegistryKey? key = Registry.CurrentUser.CreateSubKey(instance.GetKeyLocation()))
             {
-                key.SetValue(keyName, string.Join(",", values));
+                key?.SetValue(keyName, string.Join(",", values));
             }
         }
         catch { }
@@ -79,9 +84,9 @@ public class RegistryHelper
     {
         try
         {
-            using (RegistryKey key = Registry.CurrentUser.CreateSubKey($"SOFTWARE\\{regKeyName}"))
+            using (RegistryKey? key = Registry.CurrentUser.CreateSubKey($"SOFTWARE\\{regKeyName}"))
             {
-                key.SetValue(keyName, value);
+                key?.SetValue(keyName, value);
             }
         }
         catch { }
@@ -90,16 +95,12 @@ public class RegistryHelper
     {
         try
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(instance.GetKeyLocation())!)
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(instance.GetKeyLocation()))
             {
-                if (key != null)
+                if (key?.GetValue(keyName) != null)
                 {
-                    if (key.GetValue(keyName) != null)
-                    {
-                        Debug.WriteLine($"exists: {keyName},{key.GetValue(keyName)}");
-
-                        return true;
-                    }
+                    Debug.WriteLine($"exists: {keyName},{key.GetValue(keyName)}");
+                    return true;
                 }
             }
             Debug.WriteLine($"doesnt exist: {keyName}");
@@ -116,16 +117,12 @@ public class RegistryHelper
     {
         try
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey($"SOFTWARE\\{regKeyName}")!)
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey($"SOFTWARE\\{regKeyName}"))
             {
-                if (key != null)
+                if (key?.GetValue(keyName) != null)
                 {
-                    if (key.GetValue(keyName) != null)
-                    {
-                        Debug.WriteLine($"exists: {keyName},{key.GetValue(keyName)}");
-
-                        return true;
-                    }
+                    Debug.WriteLine($"exists: {keyName},{key.GetValue(keyName)}");
+                    return true;
                 }
             }
             Debug.WriteLine($"doesnt exist: {keyName}");
@@ -137,38 +134,31 @@ public class RegistryHelper
             return false;
         }
     }
-    public object ReadKeyValueRoot(string keyName)
+    public object? ReadKeyValueRoot(string keyName)
     {
         try
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey($"SOFTWARE\\{regKeyName}")!)
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey($"SOFTWARE\\{regKeyName}"))
             {
-                if (key != null)
+                var raw = key?.GetValue(keyName);
+                if (raw == null)
                 {
-                    object value = key.GetValue(keyName)!;
-                    if (value != null)
-                    {
-                        if (value is bool)
-                        {
-                            Debug.WriteLine($"returned bool for {keyName}");
-                            return (bool)value;
-                        }
-                        else if (bool.TryParse(value.ToString(), out bool boolValue))
-                        {
-                            Debug.WriteLine($"returned Parsed bool for {keyName}");
-                            return boolValue;
-                        }
-                        else
-                        {
-                            Debug.WriteLine($"returned string for {keyName}");
-                            return (string)value;
-                        }
-
-                    }
+                    Debug.WriteLine($"couldn't return for {keyName} (no value)");
+                    return null;
                 }
+                if (raw is bool b)
+                {
+                    Debug.WriteLine($"returned bool for {keyName}");
+                    return b;
+                }
+                if (bool.TryParse(raw.ToString(), out bool boolValue))
+                {
+                    Debug.WriteLine($"returned parsed bool for {keyName}");
+                    return boolValue;
+                }
+                Debug.WriteLine($"returned string for {keyName}");
+                return raw.ToString();
             }
-            Debug.WriteLine($"couldn't return for {keyName}");
-            return null;
         }
         catch (Exception ex)
         {
@@ -176,20 +166,25 @@ public class RegistryHelper
             return null;
         }
     }
-    public object ReadKeyValueRootInt(string keyName)
+    public int? ReadKeyValueRootInt(string keyName)
     {
         try
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey($"SOFTWARE\\{regKeyName}")!)
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey($"SOFTWARE\\{regKeyName}"))
             {
-                if (key != null)
+                var raw = key?.GetValue(keyName);
+                if (raw == null)
                 {
-                    return Int32.Parse(key.GetValue(keyName).ToString());
+                    Debug.WriteLine($"couldn't return value for {keyName} (no value)");
+                    return null;
                 }
+                if (int.TryParse(raw.ToString(), out int intValue))
+                {
+                    return intValue;
+                }
+                Debug.WriteLine($"value for {keyName} not an int: {raw}");
+                return null;
             }
-
-            Debug.WriteLine($"couldn't return value for {keyName}");
-            return null;
         }
         catch (Exception ex)
         {
@@ -202,9 +197,9 @@ public class RegistryHelper
     {
         try
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true)!)
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true))
             {
-                key.SetValue(appName, appPath);
+                key?.SetValue(appName, appPath);
             }
         }
         catch (Exception ex)
@@ -217,9 +212,9 @@ public class RegistryHelper
     {
         try
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true)!)
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true))
             {
-                key.DeleteValue(appName, false);
+                key?.DeleteValue(appName, false);
             }
 
         }

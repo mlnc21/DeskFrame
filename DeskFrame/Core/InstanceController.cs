@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows.Interop;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
+using DeskFrame.Core;
 
 public class InstanceController
 {
@@ -575,8 +577,8 @@ public class InstanceController
                 AddInstance();
             }
             Debug.WriteLine("Showing windows DONE");
-            // Ensure a desktop instance exists if user wants automatic desktop box
-            TryAddDesktopInstance();
+            // Erzeuge nur Kategorie-Instanzen (keine allgemeine Desktop-Basisinstanz mehr)
+            InitializeCategoryDesktopInstances();
         }
         catch (Exception ex)
         {
@@ -584,49 +586,167 @@ public class InstanceController
         }
         isInitializingInstances = false;
     }
-
-    private void TryAddDesktopInstance()
+    // Neue Initialisierung nur für Kategorien: versteckt Desktop-Dateien & Icons und erstellt Kategorie-Frames
+    private void InitializeCategoryDesktopInstances()
     {
         try
         {
             string desktopPathRaw = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-            // Zusätzlich: Öffentlicher Desktop (enthält oft weitere sichtbare Verknüpfungen)
             string publicDesktopPathRaw = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory));
-            string desktopPath = NormalizePath(desktopPathRaw);
-            if (string.IsNullOrWhiteSpace(desktopPath)) return;
-            bool alreadyHasDesktop = Instances.Any(i => NormalizePath(i.Folder) == desktopPath);
-            if (alreadyHasDesktop) return;
-            var desktopInstance = new Instance("Desktop", false)
+            // Evtl. vorhandene alte Basisinstanz "Desktop" entfernen (Migration)
+            var legacyBase = Instances.FirstOrDefault(i => i.Name == "Desktop");
+            if (legacyBase != null)
             {
-                Folder = desktopPathRaw, // Registry & UI können Original behalten
-                Name = "Desktop",
-                PosX = 20,
-                PosY = 20,
-                Width = 420,
-                Height = 320,
-                Minimized = false,
-                ShowHiddenFiles = true, // wichtig damit versteckte Dateien sichtbar bleiben
-                ShowDisplayName = true,
-                AutoExpandonCursor = true,
-                BorderEnabled = false,
-            };
-            Instances.Add(desktopInstance);
-            WriteInstanceToKey(desktopInstance);
-            var subWindow = new DeskFrameWindow(desktopInstance);
-            _subWindows.Add(subWindow);
-            subWindow.ChangeBackgroundOpacity(desktopInstance.Opacity);
-            // Vor dem Laden der Dateien Desktop-Inhalte verstecken (User + Public) & Explorer Einstellungen anpassen
+                var win = _subWindows.FirstOrDefault(w => w.Instance == legacyBase);
+                if (win != null)
+                {
+                    win.Close();
+                    _subWindows.Remove(win);
+                    _subWindowsPtr.Remove(new WindowInteropHelper(win).Handle);
+                }
+                Instances.Remove(legacyBase);
+            }
+            // Explorer Einstellungen / Attribute anpassen (einmalig, sicher gegen Mehrfachaufruf)
             EnsureExplorerHidesHiddenFiles();
-            EnsureExplorerHidesDesktopIcons();
-            HideDesktopItemsForFrame(desktopPathRaw);
-            HideDesktopItemsForFrame(publicDesktopPathRaw);
-            subWindow.Show();
-            _subWindowsPtr.Add(new WindowInteropHelper(subWindow).Handle);
-            subWindow.HandleWindowMove(true);
+            // Desktop-Manipulation optional machen (Standard = aus, damit Desktop-Aktionen erhalten bleiben)
+            bool modifyDesktopEnvironment = false;
+            try
+            {
+                if (reg.KeyExistsRoot("ModifyDesktopEnvironment"))
+                {
+                    modifyDesktopEnvironment = (bool)reg.ReadKeyValueRoot("ModifyDesktopEnvironment");
+                }
+                else
+                {
+                    // Standardwert schreiben (false)
+                    reg.WriteToRegistryRoot("ModifyDesktopEnvironment", false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"ModifyDesktopEnvironment registry read/write failed: {ex.Message}");
+            }
+            if (modifyDesktopEnvironment)
+            {
+                EnsureExplorerHidesDesktopIcons();
+                HideDesktopItemsForFrame(desktopPathRaw);
+                HideDesktopItemsForFrame(publicDesktopPathRaw);
+            }
+            // Kategorie-Instanzen erzeugen
+            BuildDesktopCategoryInstances(desktopPathRaw);
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"TryAddDesktopInstance failed: {ex.Message}");
+            Debug.WriteLine($"InitializeCategoryDesktopInstances failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Erstellt / aktualisiert Desktop-Instanzen für jede aktivierte Kategorie (ohne allgemeine Basisinstanz).
+    /// </summary>
+    private void BuildDesktopCategoryInstances(string desktopPathRaw)
+    {
+        try
+        {
+            var categories = DesktopCategoryManager.LoadCategories();
+            if (categories == null || categories.Count == 0) return;
+            // Erzeuge Liste aller Extensions für Nicht-CatchAll Kategorien (für Sonstiges-Filter)
+            var nonCatchAllExtensions = categories.Where(c => !c.CatchAll && c.Enabled)
+                .SelectMany(c => c.Extensions)
+                .Where(e => !string.IsNullOrWhiteSpace(e))
+                .Select(e => e.Trim().TrimStart('.').ToLowerInvariant())
+                .Distinct()
+                .ToList();
+            string allOthersRegex = DesktopCategoryManager.BuildExtensionRegex(nonCatchAllExtensions);
+            int baseX = 20;
+            int baseY = 20; // Start nah am oberen Bildschirmrand (keine Basisinstanz mehr)
+            int offset = 30;
+            foreach (var cat in categories.OrderBy(c => c.Order))
+            {
+                if (!cat.Enabled) continue;
+                string instanceName = $"Desktop_{cat.Name}".Replace(' ', '_');
+                // Prüfen ob bereits vorhanden
+                var existing = Instances.FirstOrDefault(i => i.Name == instanceName);
+                string filterRegex = string.Empty;
+                string hideRegex = string.Empty;
+                if (cat.CatchAll)
+                {
+                    // Sonstiges: alles was nicht durch andere Kategorien gematcht wird -> wir setzen HideRegex auf alle anderen.
+                    hideRegex = allOthersRegex; // Items mit diesen Extensions ausblenden
+                }
+                else
+                {
+                    filterRegex = !string.IsNullOrWhiteSpace(cat.Regex)
+                        ? cat.Regex!
+                        : DesktopCategoryManager.BuildExtensionRegex(cat.Extensions);
+                }
+                if (existing != null)
+                {
+                    existing.FileFilterRegex = filterRegex;
+                    existing.FileFilterHideRegex = hideRegex;
+                    continue; // Position / weitere Eigenschaften unverändert lassen
+                }
+                var inst = new Instance(instanceName, false)
+                {
+                    Folder = desktopPathRaw,
+                    Name = instanceName,
+                    PosX = baseX + (cat.Order * offset),
+                    PosY = baseY + (cat.Order * offset),
+                    Width = 420,
+                    Height = 300,
+                    Minimized = false,
+                    ShowHiddenFiles = true,
+                    ShowDisplayName = true,
+                    // AutoExpandonCursor deaktiviert für Kategorie-Frames, damit sie nicht direkt wieder verschwinden
+                    AutoExpandonCursor = false,
+                    BorderEnabled = false,
+                    FileFilterRegex = filterRegex,
+                    FileFilterHideRegex = hideRegex,
+                    TitleText = cat.Name
+                };
+                Instances.Add(inst);
+                WriteInstanceToKey(inst);
+                var win = new DeskFrameWindow(inst);
+                _subWindows.Add(win);
+                win.ChangeBackgroundOpacity(inst.Opacity);
+                win.Show();
+                _subWindowsPtr.Add(new WindowInteropHelper(win).Handle);
+                win.HandleWindowMove(true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"BuildDesktopCategoryInstances failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Entfernt bestehende Kategorie-Instanzen und erstellt sie basierend auf aktueller categories.json neu.
+    /// (Es existiert keine allgemeine Basis-Desktop-Instanz mehr.)
+    /// </summary>
+    public void RefreshDesktopCategoryInstances()
+    {
+        try
+        {
+            string desktopPathRaw = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            var categoryInstances = Instances.Where(i => i.Name.StartsWith("Desktop_")).ToList();
+            foreach (var ci in categoryInstances)
+            {
+                // zugehöriges Fenster schließen
+                var win = _subWindows.FirstOrDefault(w => w.Instance == ci);
+                if (win != null)
+                {
+                    win.Close();
+                    _subWindows.Remove(win);
+                    _subWindowsPtr.Remove(new WindowInteropHelper(win).Handle);
+                }
+                Instances.Remove(ci);
+            }
+            BuildDesktopCategoryInstances(desktopPathRaw);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"RefreshDesktopCategoryInstances failed: {ex.Message}");
         }
     }
 
@@ -824,6 +944,8 @@ public class InstanceController
     [DllImport("shell32.dll")] private static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
     private static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
     private const uint SHCNE_ASSOCCHANGED = 0x8000000; // Trigger global refresh
     private const uint SHCNF_IDLIST = 0x0;
     private const uint HWND_BROADCAST = 0xFFFF;
@@ -834,12 +956,46 @@ public class InstanceController
     {
         try
         {
+            // Standard Shell Refresh
             SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
+            // Mehrere WM_SETTINGCHANGE Varianten senden: einmal ohne lParam, einmal mit "Environment" / "ShellState"
             SendMessageTimeout(new IntPtr(HWND_BROADCAST), WM_SETTINGCHANGE, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, 2000, out _);
+            var envPtr = Marshal.StringToHGlobalUni("Environment");
+            try
+            {
+                SendMessageTimeout(new IntPtr(HWND_BROADCAST), WM_SETTINGCHANGE, IntPtr.Zero, envPtr, SMTO_ABORTIFHUNG, 2000, out _);
+            }
+            finally { Marshal.FreeHGlobal(envPtr); }
+            var shellStatePtr = Marshal.StringToHGlobalUni("ShellState");
+            try
+            {
+                SendMessageTimeout(new IntPtr(HWND_BROADCAST), WM_SETTINGCHANGE, IntPtr.Zero, shellStatePtr, SMTO_ABORTIFHUNG, 2000, out _);
+            }
+            finally { Marshal.FreeHGlobal(shellStatePtr); }
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"BroadcastSettingsChange failed: {ex.Message}");
+        }
+    }
+
+    // Zusätzlicher Shell-Refresh um Explorer-Neustart zu vermeiden
+    private void ForceShellRefresh()
+    {
+        try
+        {
+            // Versuche WorkerW/Progman zu triggern (klassischer Trick um Desktop neu zu zeichnen)
+            IntPtr progman = FindWindow("Progman", string.Empty);
+            if (progman != IntPtr.Zero)
+            {
+                SendMessageTimeout(progman, 0x052C, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, 2000, out _); // 0x052C = Private Progman Msg zur Erzeugung WorkerW
+            }
+            // Erneut ShellViews verstecken (falls Race beim ersten Mal)
+            TryHideDesktopShellViews();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"ForceShellRefresh failed: {ex.Message}");
         }
     }
 
