@@ -1303,7 +1303,7 @@ namespace DeskFrame
             rotateTransform.BeginAnimation(RotateTransform.AngleProperty, rotateAnimation);
         }
 
-        private void Minimize_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private void Minimize_MouseLeftButtonDown(object? sender, MouseButtonEventArgs? e)
         {
 
             AnimateChevron(_isMinimized, false, Instance.AnimationSpeed);
@@ -2227,43 +2227,69 @@ namespace DeskFrame
                                     {
                                         double iconSize = Instance.IconSize;
 
-                                        double scale = iconSize / Math.Max(thumbnail.PixelWidth, thumbnail.PixelHeight);
-                                        double thumbnailWidth = thumbnail.PixelWidth * scale;
-                                        double thumbnailHeight = thumbnail.PixelHeight * scale;
+                                        if (thumbnail == null || thumbnail.PixelWidth == 0 || thumbnail.PixelHeight == 0)
+                                        {
+                                            // Fallback: Icon ohne Thumbnail zeichnen
+                                            dc.DrawImage(overlay, new Rect(0,0, iconSize, iconSize));
+                                        }
+                                        else
+                                        {
+                                            double scale = iconSize / Math.Max(thumbnail.PixelWidth, thumbnail.PixelHeight);
+                                            double thumbnailWidth = thumbnail.PixelWidth * scale;
+                                            double thumbnailHeight = thumbnail.PixelHeight * scale;
 
-                                        double thumbnailX = (iconSize - thumbnailWidth) / 2.0;
-                                        double thumbnailY = (iconSize - thumbnailHeight) / 2.0;
+                                            double thumbnailX = (iconSize - thumbnailWidth) / 2.0;
+                                            double thumbnailY = (iconSize - thumbnailHeight) / 2.0;
 
-                                        dc.DrawImage(
-                                            thumbnail,
-                                            new Rect(
-                                                thumbnailX,
-                                                thumbnailY,
-                                                thumbnailWidth,
-                                                thumbnailHeight)
-                                        );
+                                            dc.DrawImage(
+                                                thumbnail,
+                                                new Rect(
+                                                    thumbnailX,
+                                                    thumbnailY,
+                                                    thumbnailWidth,
+                                                    thumbnailHeight)
+                                            );
+                                        }
                                         double overlayScale = iconSize < 32 ? iconSize / 32.0 : 1.0;
                                         if (overlayScale != 1.0)
                                         {
                                             overlay = new TransformedBitmap(overlay, new ScaleTransform(overlayScale, overlayScale));
                                             overlay.Freeze();
                                         }
-                                        double overlayX = thumbnailX;
-                                        double overlayY = thumbnailY + thumbnailHeight - overlay.PixelHeight;
-                                        dc.DrawImage(overlay,
-                                            new Rect(
-                                            overlayX,
-                                            overlayY,
-                                            overlay.PixelWidth,
-                                            overlay.PixelHeight)
-                                        );
+                                        // Position Overlay unten rechts über Thumbnail oder über Iconfläche
+                                        double overlayWidth = overlay.PixelWidth;
+                                        double overlayHeight = overlay.PixelHeight;
+                                        if (overlayScale != 1.0)
+                                        {
+                                            overlayWidth = overlay.PixelWidth;
+                                            overlayHeight = overlay.PixelHeight;
+                                        }
+                                        double overlayX;
+                                        double overlayY;
+                                        if (thumbnail != null)
+                                        {
+                                            // Werte aus Thumbnail-Zweig wurden gesetzt
+                                            double scale = iconSize / Math.Max(thumbnail.PixelWidth, thumbnail.PixelHeight);
+                                            double thumbnailWidth = thumbnail.PixelWidth * scale;
+                                            double thumbnailHeight = thumbnail.PixelHeight * scale;
+                                            double thumbnailX = (iconSize - thumbnailWidth) / 2.0;
+                                            double thumbnailY = (iconSize - thumbnailHeight) / 2.0;
+                                            overlayX = thumbnailX + thumbnailWidth - overlayWidth;
+                                            overlayY = thumbnailY + thumbnailHeight - overlayHeight;
+                                        }
+                                        else
+                                        {
+                                            overlayX = iconSize - overlayWidth;
+                                            overlayY = iconSize - overlayHeight;
+                                        }
+                                        dc.DrawImage(overlay, new Rect(overlayX, overlayY, overlayWidth, overlayHeight));
                                     }
 
                                     var rtb = new RenderTargetBitmap(
                                         Instance.IconSize,
                                         Instance.IconSize,
-                                        thumbnail.DpiX,
-                                        thumbnail.DpiY,
+                                        (thumbnail?.DpiX) ?? 96,
+                                        (thumbnail?.DpiY) ?? 96,
                                         PixelFormats.Pbgra32);
                                     rtb.Render(visual);
                                     rtb.Freeze();
