@@ -51,6 +51,35 @@ namespace DeskFrame
     public Instance Instance { get; set; }
     // Aktueller Ordnerpfad wird früh mit leerem String initialisiert und im Konstruktor überschrieben
     public string _currentFolderPath = string.Empty;
+        // Cache für häufig genutzte Regex-Ausdrücke (kompiliert für Performance)
+        private readonly Dictionary<string, Regex> _regexCache = new(StringComparer.Ordinal);
+        private Regex? GetCachedRegex(string? pattern)
+        {
+            if (string.IsNullOrWhiteSpace(pattern)) return null;
+            if (_regexCache.TryGetValue(pattern, out var rx)) return rx;
+            try
+            {
+                rx = new Regex(pattern, RegexOptions.Compiled);
+                _regexCache[pattern] = rx;
+                return rx;
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+        // Cache für dynamische Filter (Suchfeld, Wildcard * -> .*) mit einfacher Größenbegrenzung
+        private readonly Dictionary<string, Regex> _filterRegexCache = new(StringComparer.Ordinal);
+        private Regex? GetFilterRegex(string filter)
+        {
+            if (string.IsNullOrWhiteSpace(filter)) return null;
+            if (_filterRegexCache.TryGetValue(filter, out var rx)) return rx;
+            string pattern = "^" + Regex.Escape(filter).Replace("\\*", ".*") + "$";
+            rx = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            if (_filterRegexCache.Count > 50) _filterRegexCache.Clear();
+            _filterRegexCache[filter] = rx;
+            return rx;
+        }
         private FileSystemWatcher _fileWatcher = new FileSystemWatcher();
         public ObservableCollection<FileItem> FileItems { get; set; }
 
@@ -1116,7 +1145,7 @@ namespace DeskFrame
                     fileItem.IsSelected = false;
                     fileItem.Background = Brushes.Transparent;
                 }
-                string regexPattern = Regex.Escape(filter).Replace("\\*", ".*"); // Escape other regex special chars and replace '*' with '.*'
+                var filterRegex = GetFilterRegex(filter);
 
                 var filteredItems = await Task.Run(() =>
                 {
@@ -1124,9 +1153,9 @@ namespace DeskFrame
                     {
                         if (token.IsCancellationRequested) return false;
                         var fileItem = item as FileItem;
-                        return fileItem != null && (
-                               string.IsNullOrWhiteSpace(filter) ||
-                               Regex.IsMatch(fileItem.Name ?? string.Empty, regexPattern, RegexOptions.IgnoreCase));
+                        if (fileItem == null) return false;
+                        if (string.IsNullOrWhiteSpace(filter)) return true;
+                        return filterRegex != null && filterRegex.IsMatch(fileItem.Name ?? string.Empty);
                     });
                 }, token);
 
@@ -1576,8 +1605,9 @@ namespace DeskFrame
                         filteredFiles = filteredFiles.Where(entry => !entry.Attributes.HasFlag(FileAttributes.Hidden)).ToList();
                     if (Instance.FileFilterRegex != null)
                     {
-                        var regex = new Regex(Instance.FileFilterRegex);
-                        filteredFiles = filteredFiles.Where(entry => regex.IsMatch(entry.Name)).ToList();
+                        var regex = GetCachedRegex(Instance.FileFilterRegex);
+                        if (regex != null)
+                            filteredFiles = filteredFiles.Where(entry => regex.IsMatch(entry.Name)).ToList();
                     }
                     return filteredFiles;
                 }, loadFiles_cts);
@@ -1646,10 +1676,13 @@ namespace DeskFrame
                         string actualExt = isFile ? Path.GetExtension(entry.Name) : string.Empty;
                         if (existingItem == null)
                         {
-                            if (!string.IsNullOrEmpty(Instance.FileFilterHideRegex) &&
-                                new Regex(Instance.FileFilterHideRegex).IsMatch(entry.Name))
+                            if (!string.IsNullOrEmpty(Instance.FileFilterHideRegex))
                             {
-                                continue;
+                                var hideRegex = GetCachedRegex(Instance.FileFilterHideRegex);
+                                if (hideRegex != null && hideRegex.IsMatch(entry.Name))
+                            {
+                                    continue;
+                                }
                             }
 
                             FileItems.Add(new FileItem
