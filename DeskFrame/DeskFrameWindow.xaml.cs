@@ -70,6 +70,33 @@ namespace DeskFrame
         }
         // Cache für dynamische Filter (Suchfeld, Wildcard * -> .*) mit einfacher Größenbegrenzung
         private readonly Dictionary<string, Regex> _filterRegexCache = new(StringComparer.Ordinal);
+        // Thumbnail Cache (Pfad -> BitmapSource) mit einfacher TTL & Größengrenze
+        private readonly Dictionary<string, (BitmapSource bmp, DateTime added)> _thumbnailCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly TimeSpan _thumbnailTtl = TimeSpan.FromMinutes(5);
+        private const int MaxThumbnailCacheEntries = 500;
+        private BitmapSource? TryGetCachedThumbnail(string path)
+        {
+            if (_thumbnailCache.TryGetValue(path, out var entry))
+            {
+                if ((DateTime.UtcNow - entry.added) < _thumbnailTtl)
+                    return entry.bmp;
+                _thumbnailCache.Remove(path); // Abgelaufen
+            }
+            return null;
+        }
+        private void AddThumbnailToCache(string path, BitmapSource? bmp)
+        {
+            if (bmp == null) return;
+            if (_thumbnailCache.Count >= MaxThumbnailCacheEntries)
+            {
+                // einfache Strategie: kompletten Cache leeren (alternativ: LRU implementierbar)
+                _thumbnailCache.Clear();
+            }
+            if (!_thumbnailCache.ContainsKey(path))
+            {
+                _thumbnailCache[path] = (bmp, DateTime.UtcNow);
+            }
+        }
         private Regex? GetFilterRegex(string filter)
         {
             if (string.IsNullOrWhiteSpace(filter)) return null;
@@ -459,7 +486,17 @@ namespace DeskFrame
                         });
                         foreach (var item in FileItems)
                         {
-                            item.Thumbnail = await GetThumbnailAsync(item.FullPath!);
+                            var cached = TryGetCachedThumbnail(item.FullPath!);
+                            if (cached == null)
+                            {
+                                var thumb = await GetThumbnailAsync(item.FullPath!, token);
+                                AddThumbnailToCache(item.FullPath!, thumb);
+                                item.Thumbnail = thumb;
+                            }
+                            else
+                            {
+                                item.Thumbnail = cached;
+                            }
                         }
                         Dispatcher.Invoke(() =>
                         {
@@ -1671,7 +1708,12 @@ namespace DeskFrame
                         string displaySize = entry is FileInfo ? await BytesToStringAsync(size)
                                                                : Instance.CheckFolderSize ? await BytesToStringAsync(size)
                                                                                           : "";
-                        var thumbnail = await GetThumbnailAsync(entry.FullName);
+                        BitmapSource? thumbnail = TryGetCachedThumbnail(entry.FullName);
+                        if (thumbnail == null)
+                        {
+                            thumbnail = await GetThumbnailAsync(entry.FullName, loadFiles_cts);
+                            AddThumbnailToCache(entry.FullName, thumbnail);
+                        }
                         bool isFile = entry is FileInfo;
                         string actualExt = isFile ? Path.GetExtension(entry.Name) : string.Empty;
                         if (existingItem == null)
@@ -2242,10 +2284,11 @@ namespace DeskFrame
             }
         }
 
-        private async Task<BitmapSource?> GetThumbnailAsync(string path)
+        private async Task<BitmapSource?> GetThumbnailAsync(string path, CancellationToken cancellationToken = default)
         {
             return await Task.Run(async () =>
             {
+                if (cancellationToken.IsCancellationRequested) return null;
                 if (string.IsNullOrWhiteSpace(path) || (!File.Exists(path) && !Directory.Exists(path)))
                 {
                     Console.WriteLine("Invalid path: " + path);
@@ -2255,7 +2298,8 @@ namespace DeskFrame
                 BitmapSource? thumbnail = null;
                 if (Path.GetExtension(path).ToLower() == ".svg")
                 {
-                    thumbnail = await LoadSvgThumbnailAsync(path);
+                    if (cancellationToken.IsCancellationRequested) return null;
+                    thumbnail = await LoadSvgThumbnailAsync(path, cancellationToken);
                     return thumbnail;
                 }
                 string ext = Path.GetExtension(path).ToLowerInvariant();
@@ -2265,6 +2309,7 @@ namespace DeskFrame
                 {
                     try
                     {
+                        if (cancellationToken.IsCancellationRequested) return null;
                         Application.Current.Dispatcher.Invoke(() =>
                         {
                             thumbnail = GetThumbnail(path, Instance.IconSize);
@@ -2273,6 +2318,7 @@ namespace DeskFrame
                         {
                             return Application.Current.Dispatcher.Invoke(() =>
                             {
+                                if (cancellationToken.IsCancellationRequested) return null;
                                 IntPtr[] overlayIcons = new IntPtr[1];
                                 int overlayExtracted = ExtractIconEx(
                                     Environment.SystemDirectory + "\\shell32.dll",
@@ -2377,12 +2423,14 @@ namespace DeskFrame
                     int attempt = 0;
                     while (attempt < 3 && thumbnail == null)
                     {
+                        if (cancellationToken.IsCancellationRequested) return null;
                         ShellObject? shellObj = null;
                         shellObj = Directory.Exists(path) ? ShellObject.FromParsingName(path) : ShellFile.FromFilePath(path);
                         if (shellObj != null)
                         {
                             try
                             {
+                                if (cancellationToken.IsCancellationRequested) return null;
                                 Application.Current.Dispatcher.Invoke(() =>
                                 {
                                     thumbnail = GetThumbnail(path, Instance.IconSize);
@@ -2416,12 +2464,13 @@ namespace DeskFrame
 
 
 
-        private async Task<BitmapSource?> LoadSvgThumbnailAsync(string path)
+    private async Task<BitmapSource?> LoadSvgThumbnailAsync(string path, CancellationToken cancellationToken = default)
         {
             try
             {
                 // Yield einmalig um CS1998 (kein await) zu vermeiden
                 await Task.Yield();
+        if (cancellationToken.IsCancellationRequested) return null;
                 var svgDocument = Svg.SvgDocument.Open(path);
 
                 using (var bitmap = svgDocument.Draw(Instance.IconSize, Instance.IconSize))
@@ -2432,6 +2481,7 @@ namespace DeskFrame
                         ms.Seek(0, SeekOrigin.Begin);
 
                         BitmapImage? bitmapImage = null;
+                        if (cancellationToken.IsCancellationRequested) return null;
                         Application.Current.Dispatcher.Invoke(() =>
                         {
                             bitmapImage = new BitmapImage();
@@ -2452,7 +2502,7 @@ namespace DeskFrame
                 return null;
             }
         }
-        public async Task<BitmapSource?> LoadUrlIconAsync(string path)
+        public async Task<BitmapSource?> LoadUrlIconAsync(string path, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -2462,6 +2512,7 @@ namespace DeskFrame
                 bool hasHttps = false;
                 foreach (var line in File.ReadAllLines(path))
                 {
+                    if (cancellationToken.IsCancellationRequested) return null;
                     // Debug.WriteLine(line);
                     if (line.StartsWith("IconFile=", StringComparison.OrdinalIgnoreCase))
                     {
@@ -2503,6 +2554,7 @@ namespace DeskFrame
                 {
                     return await Task.Run(() =>
                     {
+                        if (cancellationToken.IsCancellationRequested) return null;
                         IntPtr[] icons = new IntPtr[1];
                         int extracted = Interop.ExtractIconEx(iconFile, iconIndex, icons, null, 1);
                         if (extracted > 0 && icons[0] != IntPtr.Zero)
@@ -2533,6 +2585,7 @@ namespace DeskFrame
                                     var visual = new DrawingVisual();
                                     using (var dc = visual.RenderOpen())
                                     {
+                                        if (cancellationToken.IsCancellationRequested) return null;
                                         dc.DrawImage(source, new Rect(0, 0, source.PixelWidth, source.PixelHeight));
                                         dc.DrawImage(overlay, new Rect(
                                             source.PixelWidth - overlay.PixelWidth,
@@ -2564,7 +2617,7 @@ namespace DeskFrame
             catch (Exception e)
             {
                 Debug.WriteLine("Error loading URL icon: " + e.Message);
-                return await GetThumbnailAsync(path);
+                return await GetThumbnailAsync(path, cancellationToken);
             }
         }
         private string GetDefaultBrowserPath(string protocol)
