@@ -47,7 +47,7 @@ public class Instance : INotifyPropertyChanged
     private int _opacity = 26;
     private int _sortBy = 1;
     private int _folderOrder = 0;
-    private int[] _showOnVirtualDesktops = Array.Empty<int>();
+    private int[]? _showOnVirtualDesktops = Array.Empty<int>(); // allow null to avoid CS8601 warnings when cleared
     private double _titleFontSize = 13;
     private int _iconSize = 32;
     public int IconSize
@@ -531,15 +531,15 @@ public class Instance : INotifyPropertyChanged
             }
         }
     }
-    public int[] ShowOnVirtualDesktops
+    public int[]? ShowOnVirtualDesktops
     {
         get => _showOnVirtualDesktops;
         set
         {
             if (_showOnVirtualDesktops != value)
             {
-                _showOnVirtualDesktops = value;
-                OnPropertyChanged(nameof(ShowOnVirtualDesktops), value?.ToString() ?? "");
+                _showOnVirtualDesktops = value ?? Array.Empty<int>();
+                OnPropertyChanged(nameof(ShowOnVirtualDesktops), (value == null || value.Length==0) ? "" : string.Join(',', value));
             }
         }
     }

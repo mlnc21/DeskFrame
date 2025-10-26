@@ -25,13 +25,25 @@ namespace DeskFrame
             _controller = controller;
             // if (_controller.reg.KeyExistsRoot("blurBackground")) blurToggle.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("blurBackground");
             var autoToggle = GetAutoUpdateToggleSwitch();
-            if (_controller.reg.KeyExistsRoot("AutoUpdate") && autoToggle != null) autoToggle.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("AutoUpdate");
+            if (_controller.reg.KeyExistsRoot("AutoUpdate") && autoToggle != null)
+            {
+                var auVal = _controller.reg.ReadKeyValueRoot("AutoUpdate");
+                autoToggle.IsChecked = auVal is bool b && b;
+            }
             var dblToggle = GetDoubleClickToHideSwitch();
-            if (_controller.reg.KeyExistsRoot("DoubleClickToHide") && dblToggle != null) dblToggle.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("DoubleClickToHide");
+            if (_controller.reg.KeyExistsRoot("DoubleClickToHide") && dblToggle != null)
+            {
+                var dblVal = _controller.reg.ReadKeyValueRoot("DoubleClickToHide");
+                dblToggle.IsChecked = dblVal is bool b && b;
+            }
             var modifyToggle = GetModifyDesktopEnvironmentSwitch();
             if (!_controller.reg.KeyExistsRoot("ModifyDesktopEnvironment"))
                 _controller.reg.WriteToRegistryRoot("ModifyDesktopEnvironment", false);
-            if (modifyToggle != null) modifyToggle.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("ModifyDesktopEnvironment");
+            if (modifyToggle != null)
+            {
+                var mdeVal = _controller.reg.ReadKeyValueRoot("ModifyDesktopEnvironment");
+                modifyToggle.IsChecked = mdeVal is bool b && b;
+            }
         }
 
 
@@ -77,7 +89,7 @@ namespace DeskFrame
         private void AutoUpdateToggleSwitch_Click(object sender, RoutedEventArgs e)
         {
             var autoToggle = GetAutoUpdateToggleSwitch();
-            if (autoToggle != null && (bool)autoToggle.IsChecked!)
+            if (autoToggle is { IsChecked: true })
             {
 
                 _controller.reg.AddToAutoRun("DeskFrame", Process.GetCurrentProcess().MainModule!.FileName);
@@ -86,9 +98,9 @@ namespace DeskFrame
             {
                 _controller.reg.RemoveFromAutoRun("DeskFrame");
             }
-            if (autoToggle?.IsChecked != null)
+            if (autoToggle?.IsChecked is bool isChecked)
             {
-                _controller.reg.WriteToRegistryRoot("AutoUpdate", autoToggle.IsChecked!);
+                _controller.reg.WriteToRegistryRoot("AutoUpdate", isChecked);
             }
         }
 

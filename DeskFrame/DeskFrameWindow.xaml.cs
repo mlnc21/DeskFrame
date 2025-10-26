@@ -84,7 +84,7 @@ namespace DeskFrame
         private int _currentVD;
         int _oriPosX, _oriPosY;
         private bool _isBlack = true;
-        private bool _checkForChages = false;
+    // Entfernt ungenutztes Feld _checkForChages (Warnung CS0414 beseitigt)
         private bool _canAutoClose = true;
         private bool _isLocked = false;
         private bool _isOnTop = false;
@@ -118,7 +118,7 @@ namespace DeskFrame
         private int _folderCount = 0;
         private DateTime _lastUpdated;
     private string _folderSize = string.Empty;
-    private double _itemWidth;
+    // Entfernt ungenutztes Feld _itemWidth (Warnung CS0169 beseitigt)
 
         public enum SortBy
         {
@@ -498,7 +498,8 @@ namespace DeskFrame
                     handled = true;
                     return IntPtr.Zero;
                 }
-                Interop.RECT rect = (Interop.RECT)Marshal.PtrToStructure(lParam, typeof(Interop.RECT));
+                // Nutze generische Überladung um Unboxing / Null-Warnung zu vermeiden
+                Interop.RECT rect = Marshal.PtrToStructure<Interop.RECT>(lParam);
 
                 Instance.Width = this.Width;
                 double height = rect.Bottom - rect.Top;
@@ -1007,7 +1008,8 @@ namespace DeskFrame
                 {
                     EnumWindows((tophandle, _) =>
                     {
-                        IntPtr shellViewIntPtr = FindWindowEx(tophandle, IntPtr.Zero, "SHELLDLL_DefView", null);
+                        // Letzter Parameter darf nicht null für Non-Nullable Signatur sein – leere Zeichenkette verwenden
+                        IntPtr shellViewIntPtr = FindWindowEx(tophandle, IntPtr.Zero, "SHELLDLL_DefView", string.Empty);
                         if (shellViewIntPtr != IntPtr.Zero)
                         {
                             shellView = shellViewIntPtr;
@@ -1092,6 +1094,10 @@ namespace DeskFrame
                 title.Visibility = Visibility.Hidden;
             }
 
+            if (FilterTextBox == null || searchQuery == null)
+            {
+                return;
+            }
             searchQuery.Content = FilterTextBox.Text;
 
             if (_collectionView == null)
@@ -1118,8 +1124,9 @@ namespace DeskFrame
                     {
                         if (token.IsCancellationRequested) return false;
                         var fileItem = item as FileItem;
-                        return string.IsNullOrWhiteSpace(filter) ||
-                               Regex.IsMatch(fileItem.Name!, regexPattern, RegexOptions.IgnoreCase);
+                        return fileItem != null && (
+                               string.IsNullOrWhiteSpace(filter) ||
+                               Regex.IsMatch(fileItem.Name ?? string.Empty, regexPattern, RegexOptions.IgnoreCase));
                     });
                 }, token);
 
@@ -1211,7 +1218,7 @@ namespace DeskFrame
                 this.Height = instance.Height;
             }
 
-            _checkForChages = true;
+            // Entfernt: _checkForChages war ungenutzt
             FileItems = new ObservableCollection<FileItem>();
             if (instance.Folder == "empty")
             {
@@ -1821,7 +1828,8 @@ namespace DeskFrame
             _canAutoClose = false;
             Task.Run(async () =>
             {
-                Thread.Sleep(300);
+                // Echte asynchrone Verzögerung statt Thread.Sleep zur Vermeidung von CS1998
+                await Task.Delay(300);
                 _canAutoClose = true;
             });
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
@@ -2006,14 +2014,16 @@ namespace DeskFrame
         {
             AnimateWindowHeight(Instance.Height, Instance.AnimationSpeed); AnimateWindowOpacity(1, Instance.AnimationSpeed);
             var sourceElement = e.OriginalSource as DependencyObject;
-            var currentBorder = new Border();
-            if (showFolderInGrid.Visibility == Visibility.Visible)
+            Border? currentBorder = null;
+            if (sourceElement is Border directBorder)
             {
-                currentBorder = sourceElement as Border ?? FindParentOrChild<Border>(sourceElement);
+                currentBorder = directBorder;
             }
-            else
+            else if (sourceElement != null)
             {
-                currentBorder = sourceElement as Border ?? FindParent<Border>(sourceElement);
+                currentBorder = showFolderInGrid.Visibility == Visibility.Visible
+                    ? FindParentOrChild<Border>(sourceElement)
+                    : FindParent<Border>(sourceElement);
             }
             _dragdropIntoFolder = true;
             if (currentBorder != _lastBorder)
@@ -2065,7 +2075,15 @@ namespace DeskFrame
             {
                 fileItem.IsSelected = false;
                 var sourceElement = e.OriginalSource as DependencyObject;
-                var currentBorder = sourceElement as Border ?? FindParentOrChild<Border>(sourceElement);
+                Border? currentBorder = null;
+                if (sourceElement is Border directBorder)
+                {
+                    currentBorder = directBorder;
+                }
+                else if (sourceElement != null)
+                {
+                    currentBorder = FindParentOrChild<Border>(sourceElement);
+                }
                 if (currentBorder != null) currentBorder.Background = Brushes.Transparent;
             }
         }
@@ -2076,7 +2094,15 @@ namespace DeskFrame
             if (sender is ListViewItem item && item.DataContext is FileItem fileItem)
             {
                 var sourceElement = e.OriginalSource as DependencyObject;
-                var currentBorder = sourceElement as Border ?? FindParentOrChild<Border>(sourceElement);
+                Border? currentBorder = null;
+                if (sourceElement is Border directBorder)
+                {
+                    currentBorder = directBorder;
+                }
+                else if (sourceElement != null)
+                {
+                    currentBorder = FindParentOrChild<Border>(sourceElement);
+                }
 
                 if (currentBorder != null)
                 {
@@ -2093,7 +2119,15 @@ namespace DeskFrame
             if (sender is ListViewItem item && item.DataContext is FileItem fileItem)
             {
                 var sourceElement = e.OriginalSource as DependencyObject;
-                var currentBorder = sourceElement as Border ?? FindParentOrChild<Border>(sourceElement);
+                Border? currentBorder = null;
+                if (sourceElement is Border directBorder)
+                {
+                    currentBorder = directBorder;
+                }
+                else if (sourceElement != null)
+                {
+                    currentBorder = FindParentOrChild<Border>(sourceElement);
+                }
 
                 if (currentBorder != null)
                 {
@@ -2353,6 +2387,8 @@ namespace DeskFrame
         {
             try
             {
+                // Yield einmalig um CS1998 (kein await) zu vermeiden
+                await Task.Yield();
                 var svgDocument = Svg.SvgDocument.Open(path);
 
                 using (var bitmap = svgDocument.Draw(Instance.IconSize, Instance.IconSize))
@@ -2530,7 +2566,7 @@ namespace DeskFrame
             AnimateChevron(_isMinimized, true, 0.01); // When 0 docked window won't open
             KeepWindowBehind();
             RegistryHelper rgh = new RegistryHelper("DeskFrame");
-            bool toBlur = true;
+            // bool toBlur entfernt (ungueltig / ungenutzt) – Warnung CS0219 behoben
             //if (rgh.KeyExistsRoot("blurBackground"))
             //{
             //    toBlur = (bool)rgh.ReadKeyValueRoot("blurBackground");

@@ -88,7 +88,8 @@ namespace DeskFrame
             };
             updateTimer.Tick += async (_, _) =>
             {
-                if (reg.KeyExistsRoot("AutoUpdate") && (bool)reg.ReadKeyValueRoot("AutoUpdate"))
+                var autoVal = reg.ReadKeyValueRoot("AutoUpdate");
+                if (reg.KeyExistsRoot("AutoUpdate") && autoVal is bool auto && auto)
                 {
                     await Updater.CheckUpdateAsync("https://api.github.com/repos/PinchToDebug/DeskFrame/releases/latest", true);
                 }

@@ -37,6 +37,8 @@ namespace DeskFrame
         private Brush _backgroundBrush;
         public ObservableCollection<string> FontList;
 
+        // (Removed wrapper properties causing name resolution issues; using direct Instance properties instead.)
+
         public FrameSettingsDialog(DeskFrameWindow frame)
         {
             InitializeComponent();

@@ -92,7 +92,11 @@ public class InstanceController
     {
         if (reg.KeyExistsRoot("blurBackground"))
         {
-            ChangeBlur((bool)reg.ReadKeyValueRoot("blurBackground"));
+            var blurVal = reg.ReadKeyValueRoot("blurBackground");
+            if (blurVal is bool blur)
+            {
+                ChangeBlur(blur);
+            }
         }
     }
     public void WriteInstanceToKey(Instance instance)
@@ -614,7 +618,8 @@ public class InstanceController
             {
                 if (reg.KeyExistsRoot("ModifyDesktopEnvironment"))
                 {
-                    modifyDesktopEnvironment = (bool)reg.ReadKeyValueRoot("ModifyDesktopEnvironment");
+                    var mdeVal = reg.ReadKeyValueRoot("ModifyDesktopEnvironment");
+                    modifyDesktopEnvironment = mdeVal is bool b && b;
                 }
                 else
                 {
