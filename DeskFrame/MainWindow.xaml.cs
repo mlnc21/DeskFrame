@@ -17,8 +17,10 @@ namespace DeskFrame
         bool startOnLogin;
         bool reseted = false;
         private uint _taskbarRestartMessage;
-        public static InstanceController _controller;
-        private LowLevelMouseHook _lowLevelMouseHook;
+    // Eager static initialization avoids CS8618 and potential early access nulls.
+    public static InstanceController _controller = new InstanceController();
+    // Optional mouse hook (only active when DoubleClickToHide is enabled)
+    private LowLevelMouseHook? _lowLevelMouseHook;
         private static bool _doubleClickToHide;
         private DateTime _lastDoubleClickTime = DateTime.MinValue;
 
@@ -38,13 +40,15 @@ namespace DeskFrame
         {
             if (_doubleClickToHide)
             {
-                _lowLevelMouseHook = new LowLevelMouseHook { AddKeyboardKeys = true };
+                _lowLevelMouseHook ??= new LowLevelMouseHook { AddKeyboardKeys = true };
+                // Ensure we don't attach the handler multiple times
+                _lowLevelMouseHook.DoubleClick -= HandleGlobalDoubleClick;
                 _lowLevelMouseHook.DoubleClick += HandleGlobalDoubleClick;
                 _lowLevelMouseHook.Start();
             }
             else
             {
-                _lowLevelMouseHook.Stop();
+                _lowLevelMouseHook?.Stop();
             }
         }
 
@@ -53,18 +57,30 @@ namespace DeskFrame
             InitializeComponent();
 
             versionHeader.Header += " " + Process.GetCurrentProcess().MainModule!.FileVersionInfo.FileVersion!.ToString();
-            _controller = new InstanceController();
+            // Controller already initialized statically; perform setup
             _controller.InitInstances();
-            if (_controller.reg.KeyExistsRoot("startOnLogin")) startOnLogin = (bool)_controller.reg.ReadKeyValueRoot("startOnLogin");
+            if (_controller.reg.KeyExistsRoot("startOnLogin"))
+            {
+                var sol = _controller.reg.ReadKeyValueRoot("startOnLogin");
+                if (sol is bool b) startOnLogin = b;
+            }
             AutorunToggle.IsChecked = startOnLogin;
             // if (_controller.reg.KeyExistsRoot("blurBackground")) BlurToggle.IsChecked = (bool)_controller.reg.ReadKeyValueRoot("blurBackground");
-            if (_controller.reg.KeyExistsRoot("DoubleClickToHide")) DoubleClickToHide = (bool)_controller.reg.ReadKeyValueRoot("DoubleClickToHide");
-            if (_controller.reg.KeyExistsRoot("AutoUpdate") && (bool)_controller.reg.ReadKeyValueRoot("AutoUpdate"))
+            if (_controller.reg.KeyExistsRoot("DoubleClickToHide"))
             {
-                Update();
-                Debug.WriteLine("Auto update checking for update");
+                var dbl = _controller.reg.ReadKeyValueRoot("DoubleClickToHide");
+                if (dbl is bool b) DoubleClickToHide = b;
             }
-            else if (!_controller.reg.KeyExistsRoot("AutoUpdate"))
+            if (_controller.reg.KeyExistsRoot("AutoUpdate"))
+            {
+                var au = _controller.reg.ReadKeyValueRoot("AutoUpdate");
+                if (au is bool b && b)
+                {
+                    Update();
+                    Debug.WriteLine("Auto update checking for update");
+                }
+            }
+            else
             {
                 _controller.reg.WriteToRegistryRoot("AutoUpdate", "False");
             }
@@ -130,16 +146,16 @@ namespace DeskFrame
         }
         private static IntPtr GetDesktopListViewHandle()
         {
-            IntPtr progman = FindWindow("Progman", null);
-            IntPtr defView = FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null);
+            IntPtr progman = FindWindow("Progman", null!); // null! intentional: any window name
+            IntPtr defView = FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null!); // search any matching
 
             if (defView == IntPtr.Zero)
             {
                 IntPtr workerw = IntPtr.Zero;
                 do
                 {
-                    workerw = FindWindowEx(IntPtr.Zero, workerw, "WorkerW", null);
-                    defView = FindWindowEx(workerw, IntPtr.Zero, "SHELLDLL_DefView", null);
+                    workerw = FindWindowEx(IntPtr.Zero, workerw, "WorkerW", null!);
+                    defView = FindWindowEx(workerw, IntPtr.Zero, "SHELLDLL_DefView", null!);
                 }
                 while (workerw != IntPtr.Zero && defView == IntPtr.Zero);
             }
@@ -265,10 +281,7 @@ namespace DeskFrame
         }
         protected override void OnClosed(EventArgs e)
         {
-            if (_lowLevelMouseHook != null)
-            {
-                _lowLevelMouseHook.Stop();
-            }
+            _lowLevelMouseHook?.Stop();
             base.OnClosed(e);
         }
 

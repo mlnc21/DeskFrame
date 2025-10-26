@@ -48,8 +48,9 @@ namespace DeskFrame
     public partial class DeskFrameWindow : System.Windows.Window
     {
         ShellContextMenu scm = new ShellContextMenu();
-        public Instance Instance { get; set; }
-        public string _currentFolderPath;
+    public Instance Instance { get; set; }
+    // Aktueller Ordnerpfad wird früh mit leerem String initialisiert und im Konstruktor überschrieben
+    public string _currentFolderPath = string.Empty;
         private FileSystemWatcher _fileWatcher = new FileSystemWatcher();
         public ObservableCollection<FileItem> FileItems { get; set; }
 
@@ -68,8 +69,10 @@ namespace DeskFrame
                 }
             }
         }
-        string _dropIntoFolderPath;
-        FrameworkElement _lastBorder;
+    // Pfad beim Drag&Drop in einen Ordner (leer = kein Ziel)
+    string _dropIntoFolderPath = string.Empty;
+    // Zuletzt gehighlightete Border beim DragEnter; kann null sein
+    FrameworkElement? _lastBorder;
         private bool _mouseIsOver;
         private bool _fixIsOnBottomInit = true;
         private bool _didFixIsOnBottom = false;
@@ -97,8 +100,8 @@ namespace DeskFrame
         private CancellationTokenSource _cts = new CancellationTokenSource();
         private CancellationTokenSource loadFilesCancellationToken = new CancellationTokenSource();
         private CancellationTokenSource _changeIconSizeCts = new CancellationTokenSource();
-        public DeskFrameWindow WonRight = null;
-        public DeskFrameWindow WonLeft = null;
+    public DeskFrameWindow? WonRight = null;
+    public DeskFrameWindow? WonLeft = null;
     MenuItem nameMenuItem = new MenuItem();
     MenuItem dateModifiedMenuItem = new MenuItem();
     MenuItem dateCreatedMenuItem = new MenuItem();
@@ -1149,7 +1152,7 @@ namespace DeskFrame
             MouseLeaveWindow();
             FileListView.ItemContainerGenerator.StatusChanged += ItemContainerGenerator_StatusChanged;
         }
-        private void ItemContainerGenerator_StatusChanged(object sender, EventArgs e)
+    private void ItemContainerGenerator_StatusChanged(object? sender, EventArgs e)
         {
             if (FileListView.ItemContainerGenerator.Status == GeneratorStatus.ContainersGenerated)
             {
@@ -1445,7 +1448,23 @@ namespace DeskFrame
 
         public void InitializeFileWatcher()
         {
-            _fileWatcher = null;
+            if (string.IsNullOrEmpty(_currentFolderPath) || !Directory.Exists(_currentFolderPath))
+            {
+                return; // Ordner ungültig – kein Watcher
+            }
+            if (_fileWatcher != null)
+            {
+                try
+                {
+                    _fileWatcher.EnableRaisingEvents = false;
+                    _fileWatcher.Created -= OnFileChanged;
+                    _fileWatcher.Deleted -= OnFileChanged;
+                    _fileWatcher.Renamed -= OnFileRenamed;
+                    _fileWatcher.Changed -= OnFileChanged;
+                    _fileWatcher.Dispose();
+                }
+                catch { /* Ignorieren bei Dispose-Rennen */ }
+            }
             _fileWatcher = new FileSystemWatcher(_currentFolderPath)
             {
                 NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite,
@@ -1478,9 +1497,9 @@ namespace DeskFrame
 
                     string fileName = Path.GetFileName(e.FullPath);
                     Debug.WriteLine("FILENAME:: " + fileName);
-                    if (renamedItem is FileInfo)
+                    if (!renamedItem.IsFolder)
                     {
-                        Debug.WriteLine("NOT");
+                        Debug.WriteLine("FILE");
                         string actualExt = Path.GetExtension(fileName);
                         renamedItem.Name = Instance.ShowFileExtension || string.IsNullOrEmpty(actualExt)
                              ? fileName
@@ -1661,8 +1680,9 @@ namespace DeskFrame
                     FileItems.Clear();
                     foreach (var fileItem in sortedList)
                     {
-                        if (Instance.FileFilterHideRegex != null && Instance.FileFilterHideRegex != ""
-                          && new Regex(Instance.FileFilterHideRegex).IsMatch(fileItem.Name))
+                        // Filter nur anwenden, wenn Regex vorhanden; Name gegen leeren Fallback prüfen
+                        if (!string.IsNullOrEmpty(Instance.FileFilterHideRegex) &&
+                            Regex.IsMatch(fileItem.Name ?? string.Empty, Instance.FileFilterHideRegex))
                         {
                             continue;
                         }
@@ -1673,7 +1693,13 @@ namespace DeskFrame
                         FirstRowByLastAccessed(FileItems, Instance.LastAccessedFiles, ItemPerRow);
                     }
                     _lastUpdated = DateTime.Now;
-                    int hiddenCount = Int32.Parse(_fileCount) - (FileItems.Count - _folderCount);
+                    // Versteckte Elemente robust berechnen (Parse-GUARD)
+                    int totalParsed;
+                    if (!int.TryParse(_fileCount, out totalParsed))
+                    {
+                        totalParsed = FileItems.Count; // Fallback falls _fileCount nicht numerisch
+                    }
+                    int hiddenCount = totalParsed - (FileItems.Count - _folderCount);
                     if (hiddenCount > 0)
                     {
                         _fileCount += $" ({hiddenCount} hidden)";
@@ -1880,36 +1906,46 @@ namespace DeskFrame
                 {
                     if (Instance.FolderOpenInsideFrame && clickedItem.IsFolder)
                     {
-                        _currentFolderPath = clickedItem.FullPath;
+                        var newPath = clickedItem.FullPath;
+                        if (string.IsNullOrEmpty(newPath)) return; // Guard gegen null/leer
+                        _currentFolderPath = newPath;
                         PathToBackButton.Visibility = _currentFolderPath == Instance.Folder
                             ? Visibility.Collapsed : Visibility.Visible;
                         InitializeFileWatcher();
                         FileItems.Clear();
-                        LoadFiles(clickedItem.FullPath);
+                        LoadFiles(newPath);
                     }
                     else
                     {
-                        Process.Start(new ProcessStartInfo(clickedItem.FullPath!) { UseShellExecute = true });
+                        var path = clickedItem.FullPath;
+                        if (!string.IsNullOrEmpty(path))
+                        {
+                            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                        }
                     }
                     if (Instance.LastAccesedToFirstRow)
                     {
-                        var fileId = GetFileId(clickedFileItem.FullPath!).ToString();
-                        var newList = new List<string>(Instance.LastAccessedFiles);
-                        newList.Remove(fileId);
-                        newList.Insert(0, fileId);
-                        Instance.LastAccessedFiles = newList;
-                        var wrapPanel = FindParentOrChild<WrapPanel>(FileWrapPanel);
-                        if (wrapPanel != null)
+                        var path = clickedItem.FullPath;
+                        if (!string.IsNullOrEmpty(path))
                         {
-                            double itemWidth = wrapPanel.ItemWidth;
-                            ItemPerRow = (int)((this.Width) / itemWidth);
+                            var fileId = GetFileId(path).ToString();
+                            var newList = new List<string>(Instance.LastAccessedFiles ?? new List<string>());
+                            newList.Remove(fileId);
+                            newList.Insert(0, fileId);
+                            Instance.LastAccessedFiles = newList;
+                            var wrapPanel = FindParentOrChild<WrapPanel>(FileWrapPanel);
+                            if (wrapPanel != null)
+                            {
+                                double itemWidth = wrapPanel.ItemWidth;
+                                ItemPerRow = (int)((this.Width) / itemWidth);
+                            }
+                            FirstRowByLastAccessed(FileItems, Instance.LastAccessedFiles, ItemPerRow);
                         }
-                        FirstRowByLastAccessed(FileItems, Instance.LastAccessedFiles, ItemPerRow);
                     }
                 }
-                catch //(Exception ex)
+                catch //(Exception)
                 {
-                    //  MessageBox.Show($"Error opening file: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    // Fehler beim Öffnen ignoriert oder optional loggen
                 }
             }
             else if (e.LeftButton == MouseButtonState.Pressed && sender is Border dragBorder)
@@ -2300,7 +2336,7 @@ namespace DeskFrame
                         bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
                         ms.Seek(0, SeekOrigin.Begin);
 
-                        BitmapImage bitmapImage = null;
+                        BitmapImage? bitmapImage = null;
                         Application.Current.Dispatcher.Invoke(() =>
                         {
                             bitmapImage = new BitmapImage();
@@ -2440,37 +2476,25 @@ namespace DeskFrame
         {
             try
             {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@$"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\{protocol}\UserChoice"))
+                var key = Registry.CurrentUser.OpenSubKey(@$"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\{protocol}\UserChoice");
+                if (key != null)
                 {
-                    if (key != null)
+                    var progId = key.GetValue("Progid");
+                    if (progId == null) return string.Empty;
+                    var commandKey = Registry.ClassesRoot.OpenSubKey($@"{progId}\shell\open\command");
+                    if (commandKey != null)
                     {
-                        object progId = key.GetValue("Progid");
-
-                        if (progId == null)
-                        {
-                            return "";
-                        }
-                        using (RegistryKey commandKey = Registry.ClassesRoot.OpenSubKey($@"{progId}\shell\open\command"))
-                        {
-                            if (commandKey != null)
-                            {
-                                object command = commandKey.GetValue("");
-
-                                if (command == null)
-                                {
-                                    return "";
-                                }
-                                return Regex.Match(command.ToString()!, "^\"([^\"]+)\"").Groups[1].Value;
-                            }
-                        }
+                        var command = commandKey.GetValue(string.Empty);
+                        if (command == null) return string.Empty;
+                        return Regex.Match(command.ToString()!, "^\"([^\"]+)\"").Groups[1].Value;
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return "";
+                return string.Empty;
             }
-            return "";
+            return string.Empty;
         }
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
@@ -2811,14 +2835,14 @@ namespace DeskFrame
 
 
 
-            nameMenuItem.Click += async (s, args) =>
+            nameMenuItem.Click += (s, args) =>
             {
                 if (Instance.SortBy % 2 != 0 || Instance.SortBy != 1) Instance.SortBy = 1;
                 else Instance.SortBy = 2;
                 UpdateIcons();
                 SortItems();
             };
-            dateModifiedMenuItem.Click += async (s, args) =>
+            dateModifiedMenuItem.Click += (s, args) =>
             {
                 if (Instance.SortBy % 2 != 0 || Instance.SortBy != 3) Instance.SortBy = 3;
                 else Instance.SortBy = 4;
@@ -2826,14 +2850,14 @@ namespace DeskFrame
                 SortItems();
             };
 
-            dateCreatedMenuItem.Click += async (s, args) =>
+            dateCreatedMenuItem.Click += (s, args) =>
             {
                 if (Instance.SortBy % 2 != 0 || Instance.SortBy != 5) Instance.SortBy = 5;
                 else Instance.SortBy = 6;
                 UpdateIcons();
                 SortItems();
             };
-            fileTypeMenuItem.Click += async (s, args) =>
+            fileTypeMenuItem.Click += (s, args) =>
             {
                 if (Instance.SortBy % 2 != 0 || Instance.SortBy != 7) Instance.SortBy = 7;
                 else Instance.SortBy = 8;
@@ -2848,14 +2872,14 @@ namespace DeskFrame
                 SortItems();
             };
 
-            ascendingMenuItem.Click += async (s, args) =>
+            ascendingMenuItem.Click += (s, args) =>
             {
                 if (Instance.SortBy % 2 == 0) Instance.SortBy -= 1;
                 UpdateIcons();
                 SortItems();
             };
 
-            descendingMenuItem.Click += async (s, args) =>
+            descendingMenuItem.Click += (s, args) =>
             {
                 if (Instance.SortBy % 2 != 0) Instance.SortBy += 1;
                 UpdateIcons();
