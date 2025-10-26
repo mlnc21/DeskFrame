@@ -29,7 +29,7 @@ namespace DeskFrame.Core
 
         public string DisplayName
         {
-            get => Name;
+            get => Name ?? string.Empty;
 
             private set
             {

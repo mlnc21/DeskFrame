@@ -15,8 +15,8 @@ public class Instance : INotifyPropertyChanged
     private double _height;
     private double _idleOpacity = 1.0;
     private double _animationSpeed = 1.0;
-    private string _name;
-    private string _folder;
+    private string _name = string.Empty; // ensure non-null default
+    private string _folder = string.Empty; // ensure non-null default
     private string _titleFontFamily = "Segoe UI";
     private bool _lastAccesedToFirstRow = false;
     private bool _settingDefault;
@@ -70,7 +70,7 @@ public class Instance : INotifyPropertyChanged
             if (_lastAccessedFiles != value)
             {
                 _lastAccessedFiles = value ?? new List<string>();
-                OnPropertyChanged(nameof(LastAccessedFiles), value.ToString());
+                OnPropertyChanged(nameof(LastAccessedFiles), (value == null) ? "[]" : string.Join(';', value));
             }
         }
     }
@@ -607,25 +607,32 @@ public class Instance : INotifyPropertyChanged
             if (v != null && double.TryParse(v.ToString(), out var parsedAnimationSpeed)) _animationSpeed = parsedAnimationSpeed;
 
             v = helper.ReadKeyValueRoot("TitleFontFamily");
-            if (v != null) _titleFontFamily = v.ToString();
+            if (v is string sFont && !string.IsNullOrWhiteSpace(sFont)) _titleFontFamily = sFont;
+            else if (v != null) _titleFontFamily = v.ToString() ?? _titleFontFamily;
 
             v = helper.ReadKeyValueRoot("ShowHiddenFiles");
-            if (v != null) _showHiddenFiles = (bool)v;
+            if (v is bool bHidden) _showHiddenFiles = bHidden;
+            else if (v != null && bool.TryParse(v.ToString(), out var parsedHidden)) _showHiddenFiles = parsedHidden;
 
             v = helper.ReadKeyValueRoot("ShowFileExtension");
-            if (v != null) _showFileExtension = (bool)v;
+            if (v is bool bExt) _showFileExtension = bExt;
+            else if (v != null && bool.TryParse(v.ToString(), out var parsedExt)) _showFileExtension = parsedExt;
 
             v = helper.ReadKeyValueRoot("ShowFileExtensionIcon");
-            if (v != null) _showFileExtensionIcon = (bool)v;
+            if (v is bool bExtIcon) _showFileExtensionIcon = bExtIcon;
+            else if (v != null && bool.TryParse(v.ToString(), out var parsedExtIcon)) _showFileExtensionIcon = parsedExtIcon;
 
             v = helper.ReadKeyValueRoot("ShowHiddenFilesIcon");
-            if (v != null) _showHiddenFilesIcon = (bool)v;
+            if (v is bool bHiddenIcon) _showHiddenFilesIcon = bHiddenIcon;
+            else if (v != null && bool.TryParse(v.ToString(), out var parsedHiddenIcon)) _showHiddenFilesIcon = parsedHiddenIcon;
 
             v = helper.ReadKeyValueRoot("ShowDisplayName");
-            if (v != null) _showDisplayName = (bool)v;
+            if (v is bool bDisplayName) _showDisplayName = bDisplayName;
+            else if (v != null && bool.TryParse(v.ToString(), out var parsedDisplayName)) _showDisplayName = parsedDisplayName;
 
             v = helper.ReadKeyValueRoot("BorderEnabled");
-            if (v != null) _borderEnabled = (bool)v;
+            if (v is bool bBorderEnabled) _borderEnabled = bBorderEnabled;
+            else if (v != null && bool.TryParse(v.ToString(), out var parsedBorderEnabled)) _borderEnabled = parsedBorderEnabled;
 
             v = helper.ReadKeyValueRoot("TitleTextAlignment");
             if (v != null && Enum.TryParse(typeof(Forms.HorizontalAlignment), v.ToString(), out var alignment))
